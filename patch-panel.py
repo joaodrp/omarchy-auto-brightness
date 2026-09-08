@@ -29,7 +29,8 @@ edit(
 """  property int enabledDisplayCount: 0
 
   // Auto brightness lives in this plugin's service; the panel reflects and
-  // flips it. Any manual brightness change made here switches it off.
+  // flips it. A manual brightness change made here is reported to it, and
+  // becomes a learned correction at the current light level.
   property var autoService: null
   readonly property bool autoAvailable: !!autoService && autoService.hardwareAvailable
   readonly property bool autoEnabled: !!autoService && autoService.enabled
@@ -40,14 +41,14 @@ edit(
   onBarChanged: bindAutoService()
 """)
 
-# 2. Manual brightness from the panel turns auto off.
+# 2. Manual brightness from the panel is learned by the controller.
 edit(
 """  function setBrightness(value) {
     var percent = Model.clampBrightness(value)
 """,
 """  function setBrightness(value) {
     var percent = Model.clampBrightness(value)
-    if (root.autoEnabled) root.setAuto(false)
+    if (root.autoEnabled) root.autoService.noteManual(percent)
 """)
 
 # 3. Enter on the brightness row toggles auto.
@@ -87,7 +88,10 @@ edit(
 """,
 """                  if (root.brightnessAvailable) {
                     var name = root.brightnessName(brightnessSlider.dragging ? brightnessSlider.liveValue : root.brightnessPercent).toUpperCase()
-                    return root.autoEnabled ? "AUTO \\u00b7 " + name : name
+                    if (!root.autoEnabled) return name
+                    var learned = root.autoService.learned
+                    var tag = learned ? (learned > 0 ? " +" : " ") + learned : ""
+                    return "AUTO" + tag + " \\u00b7 " + name
                   }
 """)
 
@@ -136,6 +140,8 @@ edit(
                   visible: autoSwitch.containsMouse
                   text: (root.autoEnabled ? "Auto brightness on" : "Auto brightness off")
                         + (root.autoService ? " \\u00b7 " + Math.round(root.autoService.lux) + " lux" : "")
+                        + (root.autoEnabled && root.autoService.learned
+                           ? " \\u00b7 learned " + (root.autoService.learned > 0 ? "+" : "") + root.autoService.learned : "")
                         + " \\u00b7 Enter toggles"
                   fontFamily: root.bar.fontFamily
                 }

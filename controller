@@ -2,23 +2,42 @@
 
 # Ambient-light brightness controller for one Apple Studio Display.
 # Prints one JSON status line per poll on stdout; Service.qml reads them.
+# Accepts "manual <percent>" lines on stdin when the panel changes brightness.
 #
 # Usage: controller [--offset N] [--paused] [--self-test]
 #   --offset N   shift the whole curve by N brightness points (calibration knob)
 #   --paused     track the sensor and report, but never write brightness
-#   --self-test  check the curve and exit
+#   --self-test  check the maths and exit
+#
+# Procedure, per 0.5 s poll (the shape Android documents and macOS shows):
+#   lux -> smoothing -> asymmetric hysteresis + debounce -> curve -> ramp
+# A manual change does not stop auto. It is learned as an offset at the
+# current light level and forgotten after a few hours or a big lux change.
 
 set -u
 
 als_scale=0.001  # the HID ALS reports millilux: ~10000 raw in a dim evening room
 poll_interval=0.5
-# ponytail: each manual check is a `sudo asdcontrol` call that lands in the
-# journal; shorten it if hotkey overrides feel slow to pause auto mode.
+# ponytail: each read-back is a `sudo asdcontrol` call that lands in the
+# journal; shorten it if hotkey changes feel slow to register.
 manual_check_interval=10
+write_check_interval=2   # and never overwrite a hotkey change older than this
 lux_ema_alpha=0.25
-hysteresis=0.20
-brighten_alpha=0.35
+brighten_threshold=0.10  # accept a brighter room at 10% above the accepted lux
+darken_threshold=0.20    # and a darker one at 20% below
+brighten_debounce=4      # seconds the new level must hold before it is accepted
+darken_debounce=8
+brighten_alpha=0.35      # ramp: fraction of the remaining distance per poll
 dim_alpha=0.10
+learned_ttl=14400        # a manual correction lasts 4 h ...
+learned_lux_span=4       # ... or until the room changes by this factor
+
+# Lux anchors -> brightness percent, interpolated in log2(lux). One percent is
+# about 6 nits on this display (raw 400..60000 spans roughly 4..600 nits), so
+# this sits between the sRGB reference (80 nits at 64 lux) and the display's
+# own idea of "dim": 5% ~ 30 nits in the dark, 24% ~ 145 nits at 100 lux.
+lux_points="0 5 20 50 100 200 400 800 1500 3000 5000"
+pct_points="5 9 14 19 24 30 38 48 60 80 100"
 
 offset=0
 paused=0
@@ -34,68 +53,119 @@ while (( $# > 0 )); do
 done
 [[ $offset =~ ^-?[0-9]+$ ]] || exit 2
 
-# Curve and smoothing from miharekar/omarchy-studio-display-auto-brightness.
+# One awk pass over the whole pipeline. Inputs and outputs are the loop state,
+# so bash never does floating point.
+#   in:  lux filtered accepted pending_dir pending_since now brightness learned
+#   out: filtered accepted pending_dir pending_since brightness base target desired
 calculate() {
-  local lux="$1" filtered="$2" accepted="$3" current_brightness="$4"
-
   awk \
-    -v lux="$lux" \
-    -v filtered="$filtered" \
-    -v accepted="$accepted" \
-    -v brightness="$current_brightness" \
+    -v lux="$1" -v filtered="$2" -v accepted="$3" \
+    -v pending_dir="$4" -v pending_since="$5" -v now="$6" \
+    -v brightness="$7" -v learned="$8" \
     -v offset="$offset" \
     -v lux_alpha="$lux_ema_alpha" \
-    -v threshold="$hysteresis" \
-    -v up_alpha="$brighten_alpha" \
-    -v down_alpha="$dim_alpha" '
-    function curve(value,    i, x, xa, xb, t) {
-      split("0 5 20 50 100 200 400 800 1500 3000 5000", lux_points, " ")
-      split("12 18 25 32 40 50 60 70 80 90 100", pct_points, " ")
-      if (value <= lux_points[1]) return pct_points[1]
-      if (value >= lux_points[11]) return pct_points[11]
+    -v up_threshold="$brighten_threshold" -v down_threshold="$darken_threshold" \
+    -v up_debounce="$brighten_debounce" -v down_debounce="$darken_debounce" \
+    -v up_alpha="$brighten_alpha" -v down_alpha="$dim_alpha" \
+    -v lux_points="$lux_points" -v pct_points="$pct_points" '
+    function curve(value,    n, i, x, xa, xb, t) {
+      n = split(lux_points, lp, " ")
+      split(pct_points, pp, " ")
+      if (value <= lp[1]) return pp[1]
+      if (value >= lp[n]) return pp[n]
       x = log(value + 1) / log(2)
-      for (i = 2; i <= 11; i++) {
-        if (value <= lux_points[i]) {
-          xa = log(lux_points[i - 1] + 1) / log(2)
-          xb = log(lux_points[i] + 1) / log(2)
+      for (i = 2; i <= n; i++) {
+        if (value <= lp[i]) {
+          xa = log(lp[i - 1] + 1) / log(2)
+          xb = log(lp[i] + 1) / log(2)
           t = (x - xa) / (xb - xa)
-          return pct_points[i - 1] + t * (pct_points[i] - pct_points[i - 1])
+          return pp[i - 1] + t * (pp[i] - pp[i - 1])
         }
       }
-      return 100
+      return pp[n]
     }
+    function clamp(v) { return v < 1 ? 1 : (v > 100 ? 100 : v) }
     BEGIN {
       filtered = filtered == "" ? lux : filtered + lux_alpha * (lux - filtered)
-      accepted = accepted == "" ? filtered : accepted
-      change = (filtered > accepted ? filtered - accepted : accepted - filtered) / (accepted > 1 ? accepted : 1)
-      if (change >= threshold) accepted = filtered
 
-      target = curve(accepted) + offset
-      if (target < 1) target = 1
-      if (target > 100) target = 100
+      if (accepted == "") {
+        accepted = filtered
+        pending_dir = 0
+        pending_since = now
+      } else {
+        base = accepted > 1 ? accepted : 1
+        dir = 0
+        if (filtered > accepted + base * up_threshold) dir = 1
+        else if (filtered < accepted - base * down_threshold) dir = -1
+        if (dir != pending_dir) { pending_dir = dir; pending_since = now }
+        if (dir != 0 && now - pending_since >= (dir > 0 ? up_debounce : down_debounce)) {
+          accepted = filtered
+          pending_dir = 0
+          pending_since = now
+        }
+      }
+
+      base_target = clamp(curve(accepted) + offset)
+      target = clamp(base_target + learned)
 
       if (brightness == "") brightness = target
       else brightness += (target > brightness ? up_alpha : down_alpha) * (target - brightness)
-      desired = int(brightness + 0.5)
-      if (desired < 1) desired = 1
-      if (desired > 100) desired = 100
+      desired = int(clamp(brightness) + 0.5)
 
-      printf "%.10f %.10f %.10f %.10f %d\n", filtered, accepted, brightness, target, desired
+      printf "%.10f %.10f %d %d %.10f %.10f %.10f %d\n", \
+        filtered, accepted, pending_dir, pending_since, brightness, base_target, target, desired
+    }'
+}
+
+learned_expired() {
+  awk -v now="$SECONDS" -v at="$learned_at" -v ttl="$learned_ttl" \
+      -v lux="$1" -v ref="$learned_lux" -v span="$learned_lux_span" '
+    BEGIN {
+      if (ref < 1) ref = 1
+      if (lux < 1) lux = 1
+      exit !(now - at >= ttl || lux > ref * span || lux < ref / span)
     }'
 }
 
 if (( self_test )); then
-  read -r _ _ _ target desired <<<"$(calculate 20 "" "" "")"
-  [[ $target == 25.0000000000 && $desired == 25 ]] || { echo "curve(20) != 25" >&2; exit 1; }
+  fail() { echo "self-test: $*" >&2; exit 1; }
+  # Curve anchors and the offset knob.
+  read -r _ _ _ _ _ base target desired <<<"$(calculate 20 "" "" 0 0 0 "" 0)"
+  [[ $desired == 14 ]] || fail "curve(20) gave $desired, want 14"
   offset=-10
-  read -r _ _ _ target desired <<<"$(calculate 0 "" "" "")"
-  [[ $target == 2.0000000000 && $desired == 2 ]] || { echo "curve(0)-10 != 2" >&2; exit 1; }
+  read -r _ _ _ _ _ _ _ desired <<<"$(calculate 0 "" "" 0 0 0 "" 0)"
+  [[ $desired == 1 ]] || fail "curve(0)-10 should clamp to 1, got $desired"
   offset=10
-  read -r _ _ _ target desired <<<"$(calculate 5000 "" "" "")"
-  [[ $target == 100.0000000000 && $desired == 100 ]] || { echo "curve(5000)+10 != 100" >&2; exit 1; }
-  # Smoothing: a jump to 5000 lux from 25% must ramp, not snap.
-  read -r _ _ brightness _ desired <<<"$(calculate 5000 "" "" 25)"
-  (( desired > 25 && desired < 100 )) || { echo "brighten step did not ramp: $desired" >&2; exit 1; }
+  read -r _ _ _ _ _ _ _ desired <<<"$(calculate 5000 "" "" 0 0 0 "" 0)"
+  [[ $desired == 100 ]] || fail "curve(5000)+10 should clamp to 100, got $desired"
+  offset=0
+  # Learned correction adds on top of the curve.
+  read -r _ _ _ _ _ base target _ <<<"$(calculate 20 "" "" 0 0 0 "" 6)"
+  [[ $base == 14.0000000000 && $target == 20.0000000000 ]] || fail "learned offset not applied: $base $target"
+  # A jump to 100 lux from an accepted 10 is not taken before the debounce.
+  read -r filtered accepted dir since _ _ _ _ <<<"$(calculate 100 10 10 0 0 0 20 0)"
+  [[ $accepted == 10.0000000000 && $dir == 1 ]] || fail "brighten accepted too early: $accepted dir=$dir"
+  read -r _ accepted dir _ _ _ _ _ <<<"$(calculate 100 90 10 1 0 3 20 0)"
+  [[ $accepted == 10.0000000000 ]] || fail "brighten accepted at 3 s, want 4: $accepted"
+  read -r _ accepted dir _ _ _ _ _ <<<"$(calculate 100 90 10 1 0 4 20 0)"
+  [[ $accepted != 10.0000000000 && $dir == 0 ]] || fail "brighten not accepted at 4 s: $accepted"
+  # Darkening waits longer.
+  read -r _ accepted _ _ _ _ _ _ <<<"$(calculate 1 1 100 -1 0 7 40 0)"
+  [[ $accepted == 100.0000000000 ]] || fail "darken accepted at 7 s, want 8: $accepted"
+  read -r _ accepted _ _ _ _ _ _ <<<"$(calculate 1 1 100 -1 0 8 40 0)"
+  [[ $accepted == 1.0000000000 ]] || fail "darken not accepted at 8 s: $accepted"
+  # Small wobble inside the band changes nothing.
+  read -r _ accepted dir _ _ _ _ _ <<<"$(calculate 105 105 100 0 0 30 40 0)"
+  [[ $accepted == 100.0000000000 && $dir == 0 ]] || fail "5% wobble was not ignored: $accepted dir=$dir"
+  # The ramp moves, but not all the way.
+  read -r _ _ _ _ _ _ _ desired <<<"$(calculate 5000 5000 5000 0 0 0 20 0)"
+  (( desired > 20 && desired < 100 )) || fail "brighten step did not ramp: $desired"
+  # Learned corrections expire on time or on a big change of light.
+  SECONDS=0; learned_at=0; learned_lux=100
+  learned_expired 100 && fail "learned offset expired immediately"
+  learned_expired 500 || fail "learned offset survived a 5x brighter room"
+  learned_expired 20 || fail "learned offset survived a 5x darker room"
+  learned_at=$(( -learned_ttl )); learned_expired 100 || fail "learned offset survived its TTL"
   echo ok
   exit 0
 fi
@@ -123,11 +193,40 @@ discover_sensor() {
   return 1
 }
 
+read_brightness() {
+  local value
+  value=$(timeout 10 omarchy-brightness-display --monitor "$monitor" 2>/dev/null || true)
+  [[ $value =~ ^[0-9]+$ ]] && printf '%s\n' "$value"
+}
+
+# Someone else moved the brightness since we last wrote it: learn it.
+learn_external_change() {
+  local current
+  (( last_applied > 0 )) || return 1
+  current=$(read_brightness) || return 1
+  last_manual_check=$SECONDS
+  (( current != last_applied )) || return 1
+  learn_manual "$current"
+}
+
 emit_status() {
-  local available="$1" error="$2" manual="${3:-false}"
-  printf '{"available":%s,"monitor":"%s","lux":%.1f,"brightness":%d,"target":%.1f,"paused":%s,"error":"%s","manual":%s}\n' \
+  local available="$1" error="$2"
+  printf '{"available":%s,"monitor":"%s","lux":%.1f,"brightness":%d,"target":%.1f,"learned":%d,"paused":%s,"error":"%s"}\n' \
     "$available" "$monitor" "${filtered_lux:-0}" "${last_applied:-0}" "${target:-0}" \
-    "$([[ $paused == 1 ]] && echo true || echo false)" "$error" "$manual"
+    "$learned_offset" "$([[ $paused == 1 ]] && echo true || echo false)" "$error"
+}
+
+# A brightness the user chose becomes an offset from the curve at this light
+# level, and the ramp restarts from that value.
+learn_manual() {
+  local value="$1"
+  [[ $value =~ ^[0-9]+$ ]] || return
+  learned_offset=$(awk -v v="$value" -v b="${base_target:-$value}" 'BEGIN { printf "%d", v - b }')
+  learned_at=$SECONDS
+  learned_lux=${accepted_lux:-0}
+  brightness=$value
+  last_applied=$value
+  last_manual_check=$SECONDS
 }
 
 reset_state() {
@@ -135,7 +234,10 @@ reset_state() {
   sensor=""
   filtered_lux=""
   accepted_lux=""
+  pending_dir=0
+  pending_since=0
   brightness=""
+  base_target=""
   last_applied=0
   last_manual_check=0
 }
@@ -143,9 +245,16 @@ reset_state() {
 trap 'exit 0' TERM INT
 
 target=0
+learned_offset=0
+learned_at=0
+learned_lux=0
 reset_state
 
 while true; do
+  while read -t 0.01 -r command argument; do
+    [[ $command == manual ]] && learn_manual "$argument"
+  done
+
   if [[ -z $monitor ]] && ! monitor=$(detect_monitor); then
     emit_status false "No Apple display connected"
     sleep "$poll_interval"
@@ -169,13 +278,19 @@ while true; do
 
   # First active pass: start the ramp from where the display actually is.
   if (( ! paused )) && [[ -z $brightness ]]; then
-    current=$(timeout 10 omarchy-brightness-display --monitor "$monitor" 2>/dev/null || true)
-    [[ $current =~ ^[0-9]+$ ]] && brightness=$current && last_applied=$current
+    if current=$(read_brightness); then
+      brightness=$current
+      last_applied=$current
+    fi
   fi
 
-  read -r filtered_lux accepted_lux brightness target desired <<<"$(
-    calculate "$lux" "$filtered_lux" "$accepted_lux" "$brightness"
+  read -r filtered_lux accepted_lux pending_dir pending_since brightness base_target target desired <<<"$(
+    calculate "$lux" "$filtered_lux" "$accepted_lux" "$pending_dir" "$pending_since" "$SECONDS" "$brightness" "$learned_offset"
   )"
+
+  if (( learned_offset != 0 )) && learned_expired "$accepted_lux"; then
+    learned_offset=0
+  fi
 
   if (( paused )); then
     emit_status true ""
@@ -183,17 +298,14 @@ while true; do
     continue
   fi
 
-  if (( last_applied > 0 && SECONDS - last_manual_check >= manual_check_interval )); then
-    current=$(timeout 10 omarchy-brightness-display --monitor "$monitor" 2>/dev/null || true)
-    if [[ $current =~ ^[0-9]+$ ]] && (( current != last_applied )); then
-      # Someone else moved the brightness: hand control back and idle until
-      # the service restarts us with the persisted state.
-      last_applied=$current
-      paused=1
-      emit_status true "" true
+  since_check=$(( SECONDS - last_manual_check ))
+  if (( since_check >= manual_check_interval )) \
+      || (( desired != last_applied && since_check >= write_check_interval )); then
+    if learn_external_change; then
+      emit_status true ""
+      sleep "$poll_interval"
       continue
     fi
-    last_manual_check=$SECONDS
   fi
 
   if (( desired != last_applied )); then
@@ -204,7 +316,6 @@ while true; do
       continue
     fi
     last_applied=$desired
-    last_manual_check=$SECONDS
   fi
 
   emit_status true ""

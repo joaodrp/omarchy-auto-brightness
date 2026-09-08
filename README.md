@@ -5,11 +5,14 @@ driven by the Apple Studio Display's own ambient light sensor.
 
 - Same panel as stock Omarchy: brightness, text size, scale, monitors. This
   plugin replaces `omarchy.monitor` in the bar and keeps its IPC target.
-- Auto follows the room: log-shaped lux curve, smoothed, with hysteresis so
-  it does not twitch. Brightening is quick, dimming is slow.
-- Moving the slider, the bar wheel, or the brightness hotkeys switches Auto
-  off. Flip the switch, or press Enter on the brightness row, to hand control
-  back.
+- Auto follows the room the way macOS and Android do: smoothed lux,
+  asymmetric hysteresis and debounce, a log-shaped curve, then a ramp.
+  Brightening is quick, dimming is slow.
+- Auto learns. Move the slider, the bar wheel, or the brightness hotkeys and
+  the change is kept as an offset at the current light level, shown in the
+  panel as `AUTO +8`. It fades after four hours or when the room changes a
+  lot. Flip the switch, or press Enter on the brightness row, to turn Auto
+  off entirely.
 - The switch only shows when an Apple display and its light sensor are
   connected.
 
@@ -46,17 +49,43 @@ omarchy-shell studio-display toggle   # also enable / disable
 
 ## How it works
 
+Every half second:
+
+| Stage | What happens |
+|-------|--------------|
+| Lux | `in_illuminance_raw` x 0.001; the sensor reports millilux. |
+| Smoothing | Exponential average, weight 0.25, so a jump settles in about 2 s. |
+| Hysteresis | The smoothed value replaces the accepted one only when 10% above it or 20% below. |
+| Debounce | And only after holding there for 4 s (brighter) or 8 s (darker). |
+| Curve | Accepted lux to brightness, linear in log2(lux) between anchors, plus `offset`, plus the learned correction. |
+| Ramp | Brightness moves 35% of the remaining distance per poll upward, 10% downward. |
+
+Curve anchors:
+
+| Lux | 0 | 5 | 20 | 50 | 100 | 200 | 400 | 800 | 1500 | 3000 | 5000 |
+|-----|---|---|----|----|-----|-----|-----|-----|------|------|------|
+| %   | 5 | 9 | 14 | 19 | 24  | 30  | 38  | 48  | 60   | 80   | 100  |
+
+One percent is about 6 nits: the display's raw brightness runs linearly from
+400 to 60000 over a panel that spans roughly 4 to 600 nits. That puts the
+curve between the sRGB reference condition (80 nits at 64 lux) and what the
+display's own scale suggests.
+
+A manual change is stored as `chosen - curve(lux)` and added to the curve
+until it expires. Changes made in the panel reach the controller at once
+over stdin; hotkey changes are picked up by the next brightness read-back.
+
 | File            | Role                                                                 |
 |-----------------|----------------------------------------------------------------------|
-| `controller`    | Bash loop: reads `in_illuminance_raw` from the display's IIO device, maps lux to a target, writes it through `omarchy-brightness-display`. |
-| `Service.qml`   | Runs the controller, persists `auto`, exposes state to the panel and IPC. |
+| `controller`    | Bash loop: the pipeline above, writing through `omarchy-brightness-display`. |
+| `Service.qml`   | Runs the controller, persists `auto`, forwards manual changes, exposes state to the panel and IPC. |
 | `Panel.qml`     | Upstream `omarchy.monitor` panel plus the switch. Generated, see below. |
 | `patch-panel.py`| The switch as anchored edits on top of the upstream panel.           |
 
-The lux curve and smoothing come from
+The loop structure started from
 [miharekar/omarchy-studio-display-auto-brightness](https://github.com/miharekar/omarchy-studio-display-auto-brightness),
-which needs the XDR's two sensors. This plugin works with the Studio
-Display's single sensor.
+which needs the XDR's two sensors. The hysteresis, debounce and learning
+follow the design Android documents in `AutomaticBrightnessController`.
 
 ### Tracking upstream
 
@@ -81,5 +110,7 @@ panel is never half-patched.
 
 - Manual changes made outside the panel are noticed within 10 s. Each check
   is a `sudo asdcontrol` call, which the journal logs.
+- The curve is tuned by eye against published reference conditions, not
+  with a light meter. `offset` and the learned correction cover the gap.
 - Brightness only. The display exposes no colour temperature control over
   USB, and Night Light stays with `hyprsunset`.

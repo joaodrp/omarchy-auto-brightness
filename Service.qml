@@ -3,7 +3,8 @@ import Quickshell.Io
 
 // Owns the auto brightness controller. The desired state lives inline on this
 // plugin's shell.json entry as `auto` (default on) and `offset` (default 0);
-// live readings come back from the controller as JSON lines.
+// live readings come back from the controller as JSON lines, and manual
+// brightness changes go down to it over stdin so it can learn them.
 Item {
   id: root
 
@@ -19,6 +20,7 @@ Item {
   property real lux: 0
   property int brightness: 0
   property real target: 0
+  property int learned: 0
   property string error: "Starting"
 
   property bool expectedStop: false
@@ -68,6 +70,13 @@ Item {
 
   function toggle() { setEnabled(!enabled) }
 
+  // A brightness the user picked while auto is on. The controller keeps it
+  // as an offset from the curve at the current light level.
+  function noteManual(percent) {
+    if (!enabled || !controller.running) return
+    controller.write("manual " + Math.round(Number(percent)) + "\n")
+  }
+
   // The controller always runs so the panel can show the toggle whenever the
   // display and its sensor are present; `--paused` only stops it writing.
   function startController() {
@@ -102,8 +111,8 @@ Item {
       if (typeof status.lux === "number") lux = status.lux
       if (typeof status.brightness === "number") brightness = status.brightness
       if (typeof status.target === "number") target = status.target
+      if (typeof status.learned === "number") learned = status.learned
       error = status.error || ""
-      if (status.manual === true) setEnabled(false)
     } catch (e) {
       error = "Invalid controller status"
     }
@@ -111,6 +120,7 @@ Item {
 
   Process {
     id: controller
+    stdinEnabled: true
     stdout: SplitParser { onRead: function(line) { root.applyStatus(line) } }
     stderr: SplitParser {
       onRead: function(line) {
@@ -158,6 +168,7 @@ Item {
         lux: root.lux,
         brightness: root.brightness,
         target: root.target,
+        learned: root.learned,
         error: root.error
       })
     }
