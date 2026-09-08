@@ -27,6 +27,17 @@ Panel {
   property var displays: []
   property int enabledDisplayCount: 0
 
+  // Auto brightness lives in this plugin's service; the panel reflects and
+  // flips it. Any manual brightness change made here switches it off.
+  property var autoService: null
+  readonly property bool autoAvailable: !!autoService && autoService.hardwareAvailable
+  readonly property bool autoEnabled: !!autoService && autoService.enabled
+  function bindAutoService() {
+    autoService = bar && bar.shell ? bar.shell.serviceFor("io.github.joaodrp.studio-display") : null
+  }
+  function setAuto(on) { if (autoService) autoService.setEnabled(on) }
+  onBarChanged: bindAutoService()
+
   // Carry sub-notch touchpad deltas between wheel events.
   property real wheelAccumulator: 0
 
@@ -147,6 +158,10 @@ Panel {
   }
 
   function activateCursor() {
+    if (focusSection === "brightness" && root.autoAvailable) {
+      root.setAuto(!root.autoEnabled)
+      return
+    }
     if (focusSection === "scale" && selectedIndex >= 0 && selectedIndex < scaleValues.length) {
       setScale(scaleValues[selectedIndex])
       return
@@ -235,6 +250,7 @@ Panel {
 
   function setBrightness(value) {
     var percent = Model.clampBrightness(value)
+    if (root.autoEnabled) root.setAuto(false)
     root.brightnessPercent = percent
     root.pendingBrightnessPercent = percent
 
@@ -349,13 +365,17 @@ Panel {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
-  Component.onCompleted: refresh()
+  Component.onCompleted: {
+    bindAutoService()
+    refresh()
+  }
 
   // KeyboardPanel primes focus at open-time, so SUPER-bound IPC summons land
   // with j/k ready to navigate. Keep a default landing point, but don't paint
   // the cursor until hover or the first navigation key.
   onOpenedChanged: {
     if (opened) {
+      bindAutoService()
       refresh()
       if (brightnessAvailable) {
         focusSection = "brightness"
@@ -561,7 +581,8 @@ Panel {
                 id: heroLabel
                 text: {
                   if (root.brightnessAvailable) {
-                    return root.brightnessName(brightnessSlider.dragging ? brightnessSlider.liveValue : root.brightnessPercent).toUpperCase()
+                    var name = root.brightnessName(brightnessSlider.dragging ? brightnessSlider.liveValue : root.brightnessPercent).toUpperCase()
+                    return root.autoEnabled ? "AUTO \u00b7 " + name : name
                   }
                   return "FIXED BRIGHTNESS"
                 }
@@ -589,7 +610,7 @@ Panel {
 
             Item {
               width: parent.width
-              implicitHeight: Math.max(brightnessHeader.implicitHeight, brightnessPercent.implicitHeight)
+              implicitHeight: Math.max(brightnessHeader.implicitHeight, brightnessPercent.implicitHeight, autoSwitch.implicitHeight)
 
               PanelSectionHeader {
                 id: brightnessHeader
@@ -607,9 +628,36 @@ Panel {
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.caption
                 font.bold: true
-                anchors.right: parent.right
+                anchors.right: autoSwitch.visible ? autoSwitch.left : parent.right
                 anchors.rightMargin: Style.space(6)
                 anchors.verticalCenter: parent.verticalCenter
+              }
+
+              ToggleSwitch {
+                id: autoSwitch
+                visible: root.autoAvailable
+                checked: root.autoEnabled
+                trackHeight: 16
+                cursorPad: Style.space(3)
+                foreground: root.bar.foreground
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                onHovered: function(on) {
+                  if (on && !root.reflowingText) {
+                    root.cursorActive = true
+                    root.focusSection = "brightness"
+                    root.selectedIndex = -1
+                  }
+                }
+                onToggled: root.setAuto(!root.autoEnabled)
+
+                PanelToolTip {
+                  visible: autoSwitch.containsMouse
+                  text: (root.autoEnabled ? "Auto brightness on" : "Auto brightness off")
+                        + (root.autoService ? " \u00b7 " + Math.round(root.autoService.lux) + " lux" : "")
+                        + " \u00b7 Enter toggles"
+                  fontFamily: root.bar.fontFamily
+                }
               }
             }
 

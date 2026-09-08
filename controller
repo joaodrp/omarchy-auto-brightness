@@ -1,0 +1,212 @@
+#!/bin/bash
+
+# Ambient-light brightness controller for one Apple Studio Display.
+# Prints one JSON status line per poll on stdout; Service.qml reads them.
+#
+# Usage: controller [--offset N] [--paused] [--self-test]
+#   --offset N   shift the whole curve by N brightness points (calibration knob)
+#   --paused     track the sensor and report, but never write brightness
+#   --self-test  check the curve and exit
+
+set -u
+
+als_scale=0.001  # the HID ALS reports millilux: ~10000 raw in a dim evening room
+poll_interval=0.5
+# ponytail: each manual check is a `sudo asdcontrol` call that lands in the
+# journal; shorten it if hotkey overrides feel slow to pause auto mode.
+manual_check_interval=10
+lux_ema_alpha=0.25
+hysteresis=0.20
+brighten_alpha=0.35
+dim_alpha=0.10
+
+offset=0
+paused=0
+self_test=0
+
+while (( $# > 0 )); do
+  case "$1" in
+    --offset) offset="${2:-0}"; shift 2 ;;
+    --paused) paused=1; shift ;;
+    --self-test) self_test=1; shift ;;
+    *) printf 'Unknown argument: %s\n' "$1" >&2; exit 2 ;;
+  esac
+done
+[[ $offset =~ ^-?[0-9]+$ ]] || exit 2
+
+# Curve and smoothing from miharekar/omarchy-studio-display-auto-brightness.
+calculate() {
+  local lux="$1" filtered="$2" accepted="$3" current_brightness="$4"
+
+  awk \
+    -v lux="$lux" \
+    -v filtered="$filtered" \
+    -v accepted="$accepted" \
+    -v brightness="$current_brightness" \
+    -v offset="$offset" \
+    -v lux_alpha="$lux_ema_alpha" \
+    -v threshold="$hysteresis" \
+    -v up_alpha="$brighten_alpha" \
+    -v down_alpha="$dim_alpha" '
+    function curve(value,    i, x, xa, xb, t) {
+      split("0 5 20 50 100 200 400 800 1500 3000 5000", lux_points, " ")
+      split("12 18 25 32 40 50 60 70 80 90 100", pct_points, " ")
+      if (value <= lux_points[1]) return pct_points[1]
+      if (value >= lux_points[11]) return pct_points[11]
+      x = log(value + 1) / log(2)
+      for (i = 2; i <= 11; i++) {
+        if (value <= lux_points[i]) {
+          xa = log(lux_points[i - 1] + 1) / log(2)
+          xb = log(lux_points[i] + 1) / log(2)
+          t = (x - xa) / (xb - xa)
+          return pct_points[i - 1] + t * (pct_points[i] - pct_points[i - 1])
+        }
+      }
+      return 100
+    }
+    BEGIN {
+      filtered = filtered == "" ? lux : filtered + lux_alpha * (lux - filtered)
+      accepted = accepted == "" ? filtered : accepted
+      change = (filtered > accepted ? filtered - accepted : accepted - filtered) / (accepted > 1 ? accepted : 1)
+      if (change >= threshold) accepted = filtered
+
+      target = curve(accepted) + offset
+      if (target < 1) target = 1
+      if (target > 100) target = 100
+
+      if (brightness == "") brightness = target
+      else brightness += (target > brightness ? up_alpha : down_alpha) * (target - brightness)
+      desired = int(brightness + 0.5)
+      if (desired < 1) desired = 1
+      if (desired > 100) desired = 100
+
+      printf "%.10f %.10f %.10f %.10f %d\n", filtered, accepted, brightness, target, desired
+    }'
+}
+
+if (( self_test )); then
+  read -r _ _ _ target desired <<<"$(calculate 20 "" "" "")"
+  [[ $target == 25.0000000000 && $desired == 25 ]] || { echo "curve(20) != 25" >&2; exit 1; }
+  offset=-10
+  read -r _ _ _ target desired <<<"$(calculate 0 "" "" "")"
+  [[ $target == 2.0000000000 && $desired == 2 ]] || { echo "curve(0)-10 != 2" >&2; exit 1; }
+  offset=10
+  read -r _ _ _ target desired <<<"$(calculate 5000 "" "" "")"
+  [[ $target == 100.0000000000 && $desired == 100 ]] || { echo "curve(5000)+10 != 100" >&2; exit 1; }
+  # Smoothing: a jump to 5000 lux from 25% must ramp, not snap.
+  read -r _ _ brightness _ desired <<<"$(calculate 5000 "" "" 25)"
+  (( desired > 25 && desired < 100 )) || { echo "brighten step did not ramp: $desired" >&2; exit 1; }
+  echo ok
+  exit 0
+fi
+
+detect_monitor() {
+  timeout 5 hyprctl monitors -j 2>/dev/null | jq -er '
+    first(.[] | select(
+      (.disabled != true)
+      and ((.make // "") | ascii_downcase | contains("apple"))
+    ) | .name)'
+}
+
+# The display's ALS shows up as a HID sensor hub under the Apple USB device
+# (vendor 05ac), which keeps a laptop's own light sensor out of the picture.
+discover_sensor() {
+  local path resolved
+  for path in /sys/bus/iio/devices/iio:device*; do
+    [[ -r $path/name && -r $path/in_illuminance_raw ]] || continue
+    [[ $(<"$path/name") == als ]] || continue
+    resolved=$(readlink -f "$path")
+    [[ ${resolved,,} == *05ac:* ]] || continue
+    printf '%s\n' "$path/in_illuminance_raw"
+    return 0
+  done
+  return 1
+}
+
+emit_status() {
+  local available="$1" error="$2" manual="${3:-false}"
+  printf '{"available":%s,"monitor":"%s","lux":%.1f,"brightness":%d,"target":%.1f,"paused":%s,"error":"%s","manual":%s}\n' \
+    "$available" "$monitor" "${filtered_lux:-0}" "${last_applied:-0}" "${target:-0}" \
+    "$([[ $paused == 1 ]] && echo true || echo false)" "$error" "$manual"
+}
+
+reset_state() {
+  monitor=""
+  sensor=""
+  filtered_lux=""
+  accepted_lux=""
+  brightness=""
+  last_applied=0
+  last_manual_check=0
+}
+
+trap 'exit 0' TERM INT
+
+target=0
+reset_state
+
+while true; do
+  if [[ -z $monitor ]] && ! monitor=$(detect_monitor); then
+    emit_status false "No Apple display connected"
+    sleep "$poll_interval"
+    continue
+  fi
+
+  if [[ -z $sensor ]] && ! sensor=$(discover_sensor); then
+    emit_status false "No Apple display light sensor found"
+    sleep "$poll_interval"
+    continue
+  fi
+
+  if ! raw=$(<"$sensor") || [[ ! $raw =~ ^[0-9]+$ ]]; then
+    emit_status false "Could not read the ambient light sensor"
+    sensor=""
+    sleep "$poll_interval"
+    continue
+  fi
+
+  lux=$(awk -v raw="$raw" -v scale="$als_scale" 'BEGIN { printf "%.10f", raw * scale }')
+
+  # First active pass: start the ramp from where the display actually is.
+  if (( ! paused )) && [[ -z $brightness ]]; then
+    current=$(timeout 10 omarchy-brightness-display --monitor "$monitor" 2>/dev/null || true)
+    [[ $current =~ ^[0-9]+$ ]] && brightness=$current && last_applied=$current
+  fi
+
+  read -r filtered_lux accepted_lux brightness target desired <<<"$(
+    calculate "$lux" "$filtered_lux" "$accepted_lux" "$brightness"
+  )"
+
+  if (( paused )); then
+    emit_status true ""
+    sleep "$poll_interval"
+    continue
+  fi
+
+  if (( last_applied > 0 && SECONDS - last_manual_check >= manual_check_interval )); then
+    current=$(timeout 10 omarchy-brightness-display --monitor "$monitor" 2>/dev/null || true)
+    if [[ $current =~ ^[0-9]+$ ]] && (( current != last_applied )); then
+      # Someone else moved the brightness: hand control back and idle until
+      # the service restarts us with the persisted state.
+      last_applied=$current
+      paused=1
+      emit_status true "" true
+      continue
+    fi
+    last_manual_check=$SECONDS
+  fi
+
+  if (( desired != last_applied )); then
+    if ! timeout 10 omarchy-brightness-display --no-osd --monitor "$monitor" "$desired%" >/dev/null 2>&1; then
+      emit_status true "Brightness command failed"
+      reset_state
+      sleep "$poll_interval"
+      continue
+    fi
+    last_applied=$desired
+    last_manual_check=$SECONDS
+  fi
+
+  emit_status true ""
+  sleep "$poll_interval"
+done
