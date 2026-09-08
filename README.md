@@ -87,6 +87,8 @@ The loop structure started from
 which needs the XDR's two sensors. The hysteresis, debounce and learning
 follow the design Android documents in `AutomaticBrightnessController`.
 
+The evidence behind each stage is in [docs/design.md](docs/design.md).
+
 ### Tracking upstream
 
 `Panel.qml` and `Model.js` are copies of Omarchy's Display panel. After an
