@@ -113,8 +113,22 @@ edit(
               id: brightnessRow
 """,
 """                font.bold: true
-                anchors.right: autoSwitch.visible ? autoSwitch.left : parent.right
-                anchors.rightMargin: Style.space(6)
+                anchors.right: autoSwitch.visible ? autoLabel.left : parent.right
+                anchors.rightMargin: autoSwitch.visible ? Style.space(12) : Style.space(6)
+                anchors.verticalCenter: parent.verticalCenter
+              }
+
+              Text {
+                id: autoLabel
+                visible: root.autoAvailable
+                text: "AUTO"
+                color: root.autoEnabled ? root.bar.foreground : Qt.darker(root.bar.foreground, 1.4)
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: true
+                font.letterSpacing: 1.2
+                anchors.right: autoSwitch.left
+                anchors.rightMargin: Style.space(4)
                 anchors.verticalCenter: parent.verticalCenter
               }
 
