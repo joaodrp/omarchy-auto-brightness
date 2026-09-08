@@ -117,53 +117,79 @@ edit(
       refresh()
 """)
 
-# 5. The auto row, under the slider.
+# 5. Follow the controller's ramp live; the panel's 5 s state poll is too
+#    slow to show it moving.
 edit(
-"""              HoverHandler {
-                onHoveredChanged: if (hovered && !root.reflowingText) {
-                  root.cursorActive = true
-                  root.focusSection = "brightness"
-                  root.selectedIndex = -1
-                }
-              }
-            }
-          }
-
-          // ---------- Text size ----------
+"""  onVisibleSectionsChanged: clampCursor()
 """,
-"""              HoverHandler {
-                onHoveredChanged: if (hovered && !root.reflowingText) {
-                  root.cursorActive = true
-                  root.focusSection = "brightness"
-                  root.selectedIndex = -1
-                }
+"""  onVisibleSectionsChanged: clampCursor()
+
+  Connections {
+    target: root.autoService
+    function onBrightnessChanged() {
+      if (!root.autoEnabled || brightnessSlider.dragging) return
+      var value = root.autoService.brightness
+      if (value > 0) root.brightnessPercent = value
+    }
+  }
+""")
+
+# 6. A self-labelled chip beside the section header: the same selectable
+#    button the scale presets use, so "on" is the selected fill.
+edit(
+"""              implicitHeight: Math.max(brightnessHeader.implicitHeight, brightnessPercent.implicitHeight)
+""",
+"""              implicitHeight: Math.max(brightnessHeader.implicitHeight, brightnessPercent.implicitHeight, autoChip.implicitHeight)
+""")
+edit(
+"""                anchors.right: parent.right
+                anchors.rightMargin: Style.space(6)
+                anchors.verticalCenter: parent.verticalCenter
               }
             }
 
-            Toggle {
-              id: autoRow
-              visible: root.autoAvailable
-              width: parent.width
-              label: "Adjust automatically"
-              description: root.autoDetail()
-              checked: root.autoEnabled
-              hasCursor: root.cursorActive && root.focusSection === "brightness" && root.selectedIndex === 0
-              foreground: root.bar.foreground
-              fontFamily: root.bar.fontFamily
-              titleSize: Style.font.body
-              onHasCursorChanged: if (hasCursor) root.ensureCursorVisible(autoRow)
-              onHovered: function(on) {
-                if (on && !root.reflowingText) {
-                  root.cursorActive = true
-                  root.focusSection = "brightness"
-                  root.selectedIndex = 0
-                }
+            CursorSurface {
+              id: brightnessRow
+""",
+"""                anchors.right: parent.right
+                anchors.rightMargin: Style.space(6)
+                anchors.verticalCenter: parent.verticalCenter
               }
-              onClicked: root.setAuto(!root.autoEnabled)
-            }
-          }
 
-          // ---------- Text size ----------
+              Button {
+                id: autoChip
+                visible: root.autoAvailable
+                text: {
+                  if (!root.autoEnabled) return "Manual"
+                  var learned = root.autoService ? root.autoService.learned : 0
+                  return "Auto" + (learned ? (learned > 0 ? " +" : " ") + learned : "")
+                }
+                tooltipText: root.autoDetail() || "Follow the room's light"
+                selected: root.autoEnabled
+                bordered: true
+                fontSize: Style.font.caption
+                horizontalPadding: Style.space(8)
+                verticalPadding: Style.space(2)
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                hasCursor: root.cursorActive && root.focusSection === "brightness" && root.selectedIndex === 0
+                anchors.left: brightnessHeader.right
+                anchors.leftMargin: Style.space(10)
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: brightnessHeader.topPadding / 2
+                onHovered: function(on) {
+                  if (on && !root.reflowingText) {
+                    root.cursorActive = true
+                    root.focusSection = "brightness"
+                    root.selectedIndex = 0
+                  }
+                }
+                onClicked: root.setAuto(!root.autoEnabled)
+              }
+            }
+
+            CursorSurface {
+              id: brightnessRow
 """)
 
 path.write_text(src)

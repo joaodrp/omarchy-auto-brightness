@@ -401,6 +401,15 @@ Panel {
   onScaleValuesChanged: clampCursor()
   onVisibleSectionsChanged: clampCursor()
 
+  Connections {
+    target: root.autoService
+    function onBrightnessChanged() {
+      if (!root.autoEnabled || brightnessSlider.dragging) return
+      var value = root.autoService.brightness
+      if (value > 0) root.brightnessPercent = value
+    }
+  }
+
   // Only poll while the panel is open; the bar glyph tracks monitor count via
   // Quickshell.screens, and open-time refresh + Component.onCompleted cover the
   // rest. External brightness changes are reflected whenever the panel is open.
@@ -617,7 +626,7 @@ Panel {
 
             Item {
               width: parent.width
-              implicitHeight: Math.max(brightnessHeader.implicitHeight, brightnessPercent.implicitHeight)
+              implicitHeight: Math.max(brightnessHeader.implicitHeight, brightnessPercent.implicitHeight, autoChip.implicitHeight)
 
               PanelSectionHeader {
                 id: brightnessHeader
@@ -638,6 +647,37 @@ Panel {
                 anchors.right: parent.right
                 anchors.rightMargin: Style.space(6)
                 anchors.verticalCenter: parent.verticalCenter
+              }
+
+              Button {
+                id: autoChip
+                visible: root.autoAvailable
+                text: {
+                  if (!root.autoEnabled) return "Manual"
+                  var learned = root.autoService ? root.autoService.learned : 0
+                  return "Auto" + (learned ? (learned > 0 ? " +" : " ") + learned : "")
+                }
+                tooltipText: root.autoDetail() || "Follow the room's light"
+                selected: root.autoEnabled
+                bordered: true
+                fontSize: Style.font.caption
+                horizontalPadding: Style.space(8)
+                verticalPadding: Style.space(2)
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                hasCursor: root.cursorActive && root.focusSection === "brightness" && root.selectedIndex === 0
+                anchors.left: brightnessHeader.right
+                anchors.leftMargin: Style.space(10)
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: brightnessHeader.topPadding / 2
+                onHovered: function(on) {
+                  if (on && !root.reflowingText) {
+                    root.cursorActive = true
+                    root.focusSection = "brightness"
+                    root.selectedIndex = 0
+                  }
+                }
+                onClicked: root.setAuto(!root.autoEnabled)
               }
             }
 
@@ -675,28 +715,6 @@ Panel {
                   root.selectedIndex = -1
                 }
               }
-            }
-
-            Toggle {
-              id: autoRow
-              visible: root.autoAvailable
-              width: parent.width
-              label: "Adjust automatically"
-              description: root.autoDetail()
-              checked: root.autoEnabled
-              hasCursor: root.cursorActive && root.focusSection === "brightness" && root.selectedIndex === 0
-              foreground: root.bar.foreground
-              fontFamily: root.bar.fontFamily
-              titleSize: Style.font.body
-              onHasCursorChanged: if (hasCursor) root.ensureCursorVisible(autoRow)
-              onHovered: function(on) {
-                if (on && !root.reflowingText) {
-                  root.cursorActive = true
-                  root.focusSection = "brightness"
-                  root.selectedIndex = 0
-                }
-              }
-              onClicked: root.setAuto(!root.autoEnabled)
             }
           }
 
