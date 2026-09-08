@@ -38,6 +38,12 @@ edit(
     autoService = bar && bar.shell ? bar.shell.serviceFor("io.github.joaodrp.studio-display") : null
   }
   function setAuto(on) { if (autoService) autoService.setEnabled(on) }
+  function autoDetail() {
+    if (!autoEnabled || !autoService) return ""
+    var learned = autoService.learned
+    if (learned) return "Learned " + (learned > 0 ? "+" : "") + learned + " at " + Math.round(autoService.lux) + " lux"
+    return Math.round(autoService.lux) + " lux"
+  }
   onBarChanged: bindAutoService()
 """)
 
@@ -51,12 +57,43 @@ edit(
     if (root.autoEnabled) root.autoService.noteManual(percent)
 """)
 
-# 3. Enter on the brightness row toggles auto.
+# 3. Keyboard model: the brightness section gains a second target, the
+#    auto row at index 0, below the slider's -1 sentinel.
+edit(
+"""    if (section === "brightness") return 0  // only the slider sentinel at -1
+""",
+"""    if (section === "brightness") return root.autoAvailable ? 1 : 0  // slider at -1, auto row at 0
+""")
+edit(
+"""    return section === "brightness" || section === "textsize" || section === "scale"
+""",
+"""    if (section === "brightness") return !root.autoAvailable
+    return section === "textsize" || section === "scale"
+""")
+edit(
+"""      if (!inSingleRow && selectedIndex > 0) { selectedIndex = selectedIndex - 1; return }
+""",
+"""      if (!inSingleRow && selectedIndex > sectionFirstIndex(focusSection)) { selectedIndex = selectedIndex - 1; return }
+""")
+edit(
+"""    if (selectedIndex > count - 1) selectedIndex = count - 1
+    if (selectedIndex < 0) selectedIndex = 0
+""",
+"""    if (selectedIndex > count - 1) selectedIndex = count - 1
+    if (selectedIndex < sectionFirstIndex(focusSection)) selectedIndex = sectionFirstIndex(focusSection)
+""")
+edit(
+"""  function adjustBrightness(delta) {
+    if (focusSection !== "brightness") return
+""",
+"""  function adjustBrightness(delta) {
+    if (focusSection !== "brightness" || selectedIndex !== -1) return
+""")
 edit(
 """  function activateCursor() {
 """,
 """  function activateCursor() {
-    if (focusSection === "brightness" && root.autoAvailable) {
+    if (focusSection === "brightness" && selectedIndex === 0 && root.autoAvailable) {
       root.setAuto(!root.autoEnabled)
       return
     }
@@ -80,81 +117,53 @@ edit(
       refresh()
 """)
 
-# 6. Auto switch on the trailing edge of the brightness header.
+# 5. The auto row, under the slider.
 edit(
-"""              implicitHeight: Math.max(brightnessHeader.implicitHeight, brightnessPercent.implicitHeight)
-""",
-"""              implicitHeight: Math.max(brightnessHeader.implicitHeight, brightnessPercent.implicitHeight, autoSwitch.implicitHeight)
-""")
-edit(
-"""                font.bold: true
-                anchors.right: parent.right
-                anchors.rightMargin: Style.space(6)
-                anchors.verticalCenter: parent.verticalCenter
+"""              HoverHandler {
+                onHoveredChanged: if (hovered && !root.reflowingText) {
+                  root.cursorActive = true
+                  root.focusSection = "brightness"
+                  root.selectedIndex = -1
+                }
               }
             }
+          }
 
-            CursorSurface {
-              id: brightnessRow
+          // ---------- Text size ----------
 """,
-"""                font.bold: true
-                anchors.right: parent.right
-                anchors.rightMargin: Style.space(6)
-                anchors.verticalCenter: parent.verticalCenter
-              }
-
-              // Mode control sits with the section name; the value keeps the
-              // right edge like every other row.
-              Text {
-                id: autoLabel
-                visible: root.autoAvailable
-                text: {
-                  var learned = root.autoEnabled && root.autoService ? root.autoService.learned : 0
-                  return "AUTO" + (learned ? (learned > 0 ? " +" : " ") + learned : "")
-                }
-                color: root.autoEnabled ? root.bar.foreground : Qt.darker(root.bar.foreground, 1.4)
-                font.family: root.bar.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-                font.letterSpacing: 1.2
-                anchors.left: brightnessHeader.right
-                anchors.leftMargin: Style.space(12)
-                anchors.baseline: brightnessHeader.baseline
-              }
-
-              ToggleSwitch {
-                id: autoSwitch
-                visible: root.autoAvailable
-                checked: root.autoEnabled
-                trackHeight: 16
-                cursorPad: Style.space(3)
-                foreground: root.bar.foreground
-                anchors.left: autoLabel.right
-                anchors.leftMargin: Style.space(4)
-                anchors.verticalCenter: autoLabel.verticalCenter
-                onHovered: function(on) {
-                  if (on && !root.reflowingText) {
-                    root.cursorActive = true
-                    root.focusSection = "brightness"
-                    root.selectedIndex = -1
-                  }
-                }
-                onToggled: root.setAuto(!root.autoEnabled)
-
-                PanelToolTip {
-                  visible: autoSwitch.containsMouse
-                  text: (root.autoEnabled ? "Auto brightness on" : "Auto brightness off")
-                        + (root.autoService ? " \\u00b7 " + Math.round(root.autoService.lux) + " lux" : "")
-                        + (root.autoEnabled && root.autoService.learned
-                           ? " \\u00b7 learned " + (root.autoService.learned > 0 ? "+" : "") + root.autoService.learned : "")
-                        + " \\u00b7 Enter toggles"
-                  fontFamily: root.bar.fontFamily
+"""              HoverHandler {
+                onHoveredChanged: if (hovered && !root.reflowingText) {
+                  root.cursorActive = true
+                  root.focusSection = "brightness"
+                  root.selectedIndex = -1
                 }
               }
             }
 
-            CursorSurface {
-              id: brightnessRow
+            Toggle {
+              id: autoRow
+              visible: root.autoAvailable
+              width: parent.width
+              label: "Adjust automatically"
+              description: root.autoDetail()
+              checked: root.autoEnabled
+              hasCursor: root.cursorActive && root.focusSection === "brightness" && root.selectedIndex === 0
+              foreground: root.bar.foreground
+              fontFamily: root.bar.fontFamily
+              titleSize: Style.font.body
+              onHasCursorChanged: if (hasCursor) root.ensureCursorVisible(autoRow)
+              onHovered: function(on) {
+                if (on && !root.reflowingText) {
+                  root.cursorActive = true
+                  root.focusSection = "brightness"
+                  root.selectedIndex = 0
+                }
+              }
+              onClicked: root.setAuto(!root.autoEnabled)
+            }
+          }
+
+          // ---------- Text size ----------
 """)
 
 path.write_text(src)
