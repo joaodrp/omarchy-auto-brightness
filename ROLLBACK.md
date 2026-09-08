@@ -34,3 +34,19 @@ omarchy-shell shell reloadConfig
 ```
 
 Nothing under `/etc`, `/usr`, systemd, udev or sudoers is changed.
+
+## Comparison fork
+
+`miharekar/omarchy-studio-display-auto-brightness`, forked to
+`joaodrp/omarchy-studio-display-auto-brightness` with a `single-sensor`
+branch, is installed beside this plugin for comparison.
+
+| Change | Where | Undo |
+|--------|-------|------|
+| Plugin symlink | `~/.config/omarchy/plugins/miharekar.studio-display-auto-brightness` -> `~/Developer/github.com/joaodrp/omarchy-studio-display-auto-brightness` | `omarchy plugin disable miharekar.studio-display-auto-brightness && rm` the symlink |
+| Bar entry with `sensor` / `profile` / `paused` keys | `~/.config/omarchy/shell.json` | Removed by the disable above |
+| GitHub fork | github.com/joaodrp/omarchy-studio-display-auto-brightness | `gh repo delete joaodrp/omarchy-studio-display-auto-brightness` |
+
+Only one of the two controllers should be active at a time. Each treats the
+other's writes as a manual change and pauses itself, so they do not fight,
+but whichever wrote last wins.
