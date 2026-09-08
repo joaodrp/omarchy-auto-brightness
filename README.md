@@ -58,7 +58,7 @@ Every half second:
 | Hysteresis | The smoothed value replaces the accepted one only when 10% above it or 20% below. |
 | Debounce | And only after holding there for 4 s (brighter) or 8 s (darker). |
 | Curve | Accepted lux to brightness, linear in log2(lux) between anchors, plus `offset`, plus the learned correction. |
-| Ramp | Brightness moves 35% of the remaining distance per poll upward, 10% downward. |
+| Ramp | 20 points per second up, 13 down, and any change completes within 2 s up or 3 s down. The display has about 20 visible steps, so a quick fade reads smoother than a slow one. |
 
 Curve anchors:
 

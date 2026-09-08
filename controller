@@ -27,8 +27,13 @@ brighten_threshold=0.10  # accept a brighter room at 10% above the accepted lux
 darken_threshold=0.20    # and a darker one at 20% below
 brighten_debounce=4      # seconds the new level must hold before it is accepted
 darken_debounce=8
-brighten_alpha=0.35      # ramp: fraction of the remaining distance per poll
-dim_alpha=0.10
+# Ramp: a fixed rate in points per second, but any change completes within
+# the cap, the shape Android uses for automatic changes. This display shows
+# about 20 visible steps, so a faster fade reads smoother, not harsher.
+brighten_rate=20
+brighten_cap=2
+dim_rate=13
+dim_cap=3
 learned_ttl=14400        # a manual correction lasts 4 h ...
 learned_lux_span=4       # ... or until the room changes by this factor
 
@@ -66,7 +71,8 @@ calculate() {
     -v lux_alpha="$lux_ema_alpha" \
     -v up_threshold="$brighten_threshold" -v down_threshold="$darken_threshold" \
     -v up_debounce="$brighten_debounce" -v down_debounce="$darken_debounce" \
-    -v up_alpha="$brighten_alpha" -v down_alpha="$dim_alpha" \
+    -v up_rate="$brighten_rate" -v up_cap="$brighten_cap" \
+    -v down_rate="$dim_rate" -v down_cap="$dim_cap" -v poll="$poll_interval" \
     -v lux_points="$lux_points" -v pct_points="$pct_points" '
     function curve(value,    n, i, x, xa, xb, t) {
       n = split(lux_points, lp, " ")
@@ -109,7 +115,15 @@ calculate() {
       target = clamp(base_target + learned)
 
       if (brightness == "") brightness = target
-      else brightness += (target > brightness ? up_alpha : down_alpha) * (target - brightness)
+      else {
+        delta = target - brightness
+        span = delta < 0 ? -delta : delta
+        rate = delta > 0 ? up_rate : down_rate
+        cap = delta > 0 ? up_cap : down_cap
+        step = rate * poll
+        if (span / cap * poll > step) step = span / cap * poll
+        brightness = span <= step ? target : brightness + (delta > 0 ? step : -step)
+      }
       desired = int(clamp(brightness) + 0.5)
 
       printf "%.10f %.10f %d %d %.10f %.10f %.10f %d\n", \
@@ -157,9 +171,15 @@ if (( self_test )); then
   # Small wobble inside the band changes nothing.
   read -r _ accepted dir _ _ _ _ _ <<<"$(calculate 105 105 100 0 0 30 40 0)"
   [[ $accepted == 100.0000000000 && $dir == 0 ]] || fail "5% wobble was not ignored: $accepted dir=$dir"
-  # The ramp moves, but not all the way.
+  # The ramp: an 80-point brighten completes in the 2 s cap, so 20 per poll.
   read -r _ _ _ _ _ _ _ desired <<<"$(calculate 5000 5000 5000 0 0 0 20 0)"
-  (( desired > 20 && desired < 100 )) || fail "brighten step did not ramp: $desired"
+  (( desired == 40 )) || fail "brighten step should be 20 points, got $((desired - 20))"
+  # A 39-point dim takes the 3 s cap: 6.5 per poll.
+  read -r _ _ _ _ _ _ _ desired <<<"$(calculate 0 0 0 0 0 0 40 0)"
+  (( desired == 34 )) || fail "dim step should be 6.5 points, got $((40 - desired))"
+  # A small change lands in one poll.
+  read -r _ _ _ _ _ _ _ desired <<<"$(calculate 0 0 0 0 0 0 9 0)"
+  (( desired == 5 )) || fail "small change should land at once, got $desired"
   # Learned corrections expire on time or on a big change of light.
   SECONDS=0; learned_at=0; learned_lux=100
   learned_expired 100 && fail "learned offset expired immediately"
