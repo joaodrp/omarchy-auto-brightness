@@ -582,11 +582,7 @@ Panel {
                 id: heroLabel
                 text: {
                   if (root.brightnessAvailable) {
-                    var name = root.brightnessName(brightnessSlider.dragging ? brightnessSlider.liveValue : root.brightnessPercent).toUpperCase()
-                    if (!root.autoEnabled) return name
-                    var learned = root.autoService.learned
-                    var tag = learned ? (learned > 0 ? " +" : " ") + learned : ""
-                    return "AUTO" + tag + " \u00b7 " + name
+                    return root.brightnessName(brightnessSlider.dragging ? brightnessSlider.liveValue : root.brightnessPercent).toUpperCase()
                   }
                   return "FIXED BRIGHTNESS"
                 }
@@ -642,7 +638,10 @@ Panel {
               Text {
                 id: autoLabel
                 visible: root.autoAvailable
-                text: "AUTO"
+                text: {
+                  var learned = root.autoEnabled && root.autoService ? root.autoService.learned : 0
+                  return "AUTO" + (learned ? (learned > 0 ? " +" : " ") + learned : "")
+                }
                 color: root.autoEnabled ? root.bar.foreground : Qt.darker(root.bar.foreground, 1.4)
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.caption
@@ -650,7 +649,7 @@ Panel {
                 font.letterSpacing: 1.2
                 anchors.left: brightnessHeader.right
                 anchors.leftMargin: Style.space(12)
-                anchors.verticalCenter: parent.verticalCenter
+                anchors.baseline: brightnessHeader.baseline
               }
 
               ToggleSwitch {
@@ -662,7 +661,7 @@ Panel {
                 foreground: root.bar.foreground
                 anchors.left: autoLabel.right
                 anchors.leftMargin: Style.space(4)
-                anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenter: autoLabel.verticalCenter
                 onHovered: function(on) {
                   if (on && !root.reflowingText) {
                     root.cursorActive = true
