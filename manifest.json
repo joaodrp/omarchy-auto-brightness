@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.joaodrp.studio-display",
+  "name": "Studio Display",
+  "version": "0.1.0",
+  "author": "João Pereira",
+  "license": "MIT",
+  "description": "Omarchy's Display panel with an ambient-light auto brightness toggle for the Apple Studio Display.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Studio Display",
+    "description": "Brightness slider with an auto toggle driven by the Studio Display's light sensor, plus the stock Display panel controls.",
+    "category": "System",
+    "allowMultiple": false
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.monitor"
+  }
+}
