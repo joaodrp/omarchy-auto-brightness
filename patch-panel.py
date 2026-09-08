@@ -113,11 +113,13 @@ edit(
               id: brightnessRow
 """,
 """                font.bold: true
-                anchors.right: autoSwitch.visible ? autoLabel.left : parent.right
-                anchors.rightMargin: autoSwitch.visible ? Style.space(12) : Style.space(6)
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(6)
                 anchors.verticalCenter: parent.verticalCenter
               }
 
+              // Mode control sits with the section name; the value keeps the
+              // right edge like every other row.
               Text {
                 id: autoLabel
                 visible: root.autoAvailable
@@ -127,8 +129,8 @@ edit(
                 font.pixelSize: Style.font.caption
                 font.bold: true
                 font.letterSpacing: 1.2
-                anchors.right: autoSwitch.left
-                anchors.rightMargin: Style.space(4)
+                anchors.left: brightnessHeader.right
+                anchors.leftMargin: Style.space(12)
                 anchors.verticalCenter: parent.verticalCenter
               }
 
@@ -139,7 +141,8 @@ edit(
                 trackHeight: 16
                 cursorPad: Style.space(3)
                 foreground: root.bar.foreground
-                anchors.right: parent.right
+                anchors.left: autoLabel.right
+                anchors.leftMargin: Style.space(4)
                 anchors.verticalCenter: parent.verticalCenter
                 onHovered: function(on) {
                   if (on && !root.reflowingText) {
