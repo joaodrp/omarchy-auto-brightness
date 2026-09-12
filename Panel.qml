@@ -23,7 +23,10 @@ Panel {
   property bool brightnessSetQueued: false
   property real wheelAccumulator: 0
 
-  // Keyboard cursor: -1 is the slider, 0 is the Auto chip.
+  readonly property int learned: service ? service.learned : 0
+
+  // Keyboard cursor: -1 is the slider, 0 the Auto chip, 1 the restore button
+  // while a correction is learned.
   property bool cursorActive: false
   property int selectedIndex: -1
 
@@ -77,11 +80,12 @@ Panel {
 
   function moveCursor(delta) {
     var next = selectedIndex + delta
-    selectedIndex = Math.max(-1, Math.min(0, next))
+    selectedIndex = Math.max(-1, Math.min(root.learned ? 1 : 0, next))
   }
 
   function activateCursor() {
     if (selectedIndex === 0) root.setAuto(!root.autoEnabled)
+    else if (selectedIndex === 1 && root.service) root.service.forgetLearned()
   }
 
   onOpenedChanged: {
@@ -202,19 +206,39 @@ Panel {
             }
           }
           trailingControl: Component {
-            Button {
-              id: autoChip
-              text: root.chipText()
-              tooltipText: root.autoEnabled ? "Switch to manual" : "Follow the room's light"
-              selected: root.autoEnabled
-              bordered: true
-              foreground: root.bar.foreground
-              fontFamily: root.bar.fontFamily
-              hasCursor: root.cursorActive && root.selectedIndex === 0
-              onHovered: function(on) {
-                if (on) { root.cursorActive = true; root.selectedIndex = 0 }
+            Row {
+              spacing: Style.space(6)
+
+              // Back to the curve. Only while a correction is learned.
+              Button {
+                visible: root.autoEnabled && root.learned !== 0
+                iconText: "\u{F099B}"
+                tooltipText: "Forget the " + (root.learned > 0 ? "+" : "") + root.learned + " correction"
+                bordered: true
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                hasCursor: root.cursorActive && root.selectedIndex === 1
+                anchors.verticalCenter: parent.verticalCenter
+                onHovered: function(on) {
+                  if (on) { root.cursorActive = true; root.selectedIndex = 1 }
+                }
+                onClicked: root.service.forgetLearned()
               }
-              onClicked: root.setAuto(!root.autoEnabled)
+
+              Button {
+                text: root.chipText()
+                tooltipText: root.autoEnabled ? "Switch to manual" : "Follow the room's light"
+                selected: root.autoEnabled
+                bordered: true
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                hasCursor: root.cursorActive && root.selectedIndex === 0
+                anchors.verticalCenter: parent.verticalCenter
+                onHovered: function(on) {
+                  if (on) { root.cursorActive = true; root.selectedIndex = 0 }
+                }
+                onClicked: root.setAuto(!root.autoEnabled)
+              }
             }
           }
         }

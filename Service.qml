@@ -77,6 +77,12 @@ Item {
     controller.write("manual " + Math.round(Number(percent)) + "\n")
   }
 
+  // Drop the learned offset and go back to the curve.
+  function forgetLearned() {
+    if (!controller.running) return
+    controller.write("forget\n")
+  }
+
   // The controller always runs so the panel can show the toggle whenever the
   // display and its sensor are present; `--paused` only stops it writing.
   function startController() {
@@ -175,6 +181,7 @@ Item {
     function enable(): string { root.setEnabled(true); return "enabled" }
     function disable(): string { root.setEnabled(false); return "disabled" }
     function toggle(): string { root.toggle(); return root.enabled ? "enabled" : "disabled" }
+    function forget(): string { root.forgetLearned(); return "forgot" }
   }
 
   Component.onDestruction: {

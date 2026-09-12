@@ -46,6 +46,7 @@ IPC, for keybindings or scripts:
 ```sh
 omarchy-shell auto-brightness status
 omarchy-shell auto-brightness toggle   # also enable / disable
+omarchy-shell auto-brightness forget   # drop the learned correction
 ```
 
 ## How it works

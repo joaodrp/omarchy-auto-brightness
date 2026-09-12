@@ -2,7 +2,7 @@
 
 # Ambient-light brightness controller for one Apple Studio Display.
 # Prints one JSON status line per poll on stdout; Service.qml reads them.
-# Accepts "manual <percent>" lines on stdin when the panel changes brightness.
+# Accepts "manual <percent>" and "forget" lines on stdin from the panel.
 #
 # Usage: controller [--offset N] [--paused] [--self-test]
 #   --offset N   shift the whole curve by N brightness points (calibration knob)
@@ -272,7 +272,10 @@ reset_state
 
 while true; do
   while read -t 0.01 -r command argument; do
-    [[ $command == manual ]] && learn_manual "$argument"
+    case $command in
+      manual) learn_manual "$argument" ;;
+      forget) learned_offset=0 ;;
+    esac
   done
 
   if [[ -z $monitor ]] && ! monitor=$(detect_monitor); then
