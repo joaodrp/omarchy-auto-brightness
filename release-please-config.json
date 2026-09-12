@@ -4,8 +4,14 @@
     ".": {
       "release-type": "simple",
       "extra-files": [
-        { "type": "json", "path": "manifest.json", "jsonpath": "$.version" }
-      ]
+        {
+          "type": "json",
+          "path": "manifest.json",
+          "jsonpath": "$.version"
+        }
+      ],
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true
     }
   }
 }

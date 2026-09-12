@@ -21,8 +21,10 @@ displays and laptop panels can be added; see [Other displays](#other-displays).
 - Auto learns. Move the slider, the bar wheel, or the brightness hotkeys and
   the change is kept as an offset at the current light level, shown on the
   chip as `Auto +8`. It fades after four hours or when the room changes a
-  lot. Click the chip, or press Enter on it, to switch between Auto and
-  Manual.
+  lot, or when you press the restore button beside the chip. Click the
+  chip, or press Enter on it, to switch between Auto and Manual.
+
+<img src="docs/images/learned.png" alt="The panel after a manual change: the chip reads Auto +18 and a restore button sits beside it" width="500">
 
 ## Requirements
 
