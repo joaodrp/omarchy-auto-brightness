@@ -14,19 +14,18 @@ Panel {
   ipcTarget: "io.github.joaodrp.auto-brightness"
 
   property var service: null
-  readonly property bool available: !!service && service.hardwareAvailable
-  readonly property bool autoEnabled: !!service && service.enabled
-  readonly property string monitor: service ? service.monitor : ""
+  readonly property bool available: service?.hardwareAvailable ?? false
+  readonly property bool autoEnabled: service?.enabled ?? false
+  readonly property int offset: service?.offset ?? 0
+  readonly property int lux: Math.round(service?.lux ?? 0)
+  readonly property bool canRestore: autoEnabled && offset !== 0
+  readonly property string icon: autoEnabled ? "󰃟" : "󰃠"
 
+  // The slider follows the controller, except while the pointer drags it.
   property int brightnessPercent: 0
-  property int pendingBrightnessPercent: 0
-  property bool brightnessSetQueued: false
   property real wheelAccumulator: 0
 
-  readonly property int offset: service ? service.offset : 0
-
-  // Keyboard cursor: -1 is the slider, 0 the Auto chip, 1 the restore button
-  // while an offset is set.
+  // Keyboard cursor: -1 the slider, 0 the Auto chip, 1 the restore button.
   property bool cursorActive: false
   property int selectedIndex: -1
 
@@ -34,47 +33,20 @@ Panel {
     service = bar && bar.shell ? bar.shell.serviceFor(root.moduleName) : null
   }
   onBarChanged: bindService()
-  Component.onCompleted: {
-    bindService()
-    refresh()
-  }
-
-  function refresh() {
-    if (root.monitor === "" || stateProc.running) return
-    stateProc.command = ["omarchy-brightness-display", "--monitor", root.monitor]
-    stateProc.running = true
-  }
-
-  function setAuto(on) { if (service) service.setEnabled(on) }
+  Component.onCompleted: bindService()
 
   function chipText() {
     if (!autoEnabled) return "Manual"
-    return "Auto" + (root.offset ? (root.offset > 0 ? " +" : " ") + root.offset : "")
+    return "Auto" + (offset ? (offset > 0 ? " +" : " ") + offset : "")
   }
 
   function setBrightness(value) {
-    var percent = Math.max(1, Math.min(100, Math.round(Number(value))))
-    root.brightnessPercent = percent
-    root.pendingBrightnessPercent = percent
-
-    // With Auto on the controller learns the value and writes it itself, so
-    // the two never race for the display.
-    if (root.autoEnabled) {
-      root.service.noteManual(percent)
-      return
-    }
-
-    if (setBrightnessProc.running) {
-      root.brightnessSetQueued = true
-      return
-    }
-    root.brightnessSetQueued = false
-    setBrightnessProc.command = ["omarchy-brightness-display", "--no-osd", "--monitor", root.monitor, percent + "%"]
-    setBrightnessProc.running = true
+    root.brightnessPercent = Util.clamp(Math.round(Number(value)), 1, 100)
+    if (service) service.setBrightness(root.brightnessPercent)
   }
 
   function previewBrightness(value) {
-    root.brightnessPercent = Math.max(1, Math.min(100, Math.round(Number(value))))
+    root.brightnessPercent = Util.clamp(Math.round(Number(value)), 1, 100)
     brightnessDebounce.restart()
   }
 
@@ -83,32 +55,34 @@ Panel {
     bar.shell.summon("omarchy.osd", JSON.stringify({ icon: "brightness", value: percent }))
   }
 
+  function focusCursor(index) {
+    cursorActive = true
+    selectedIndex = index
+  }
+
   function moveCursor(delta) {
-    var next = selectedIndex + delta
-    selectedIndex = Math.max(-1, Math.min(root.autoEnabled && root.offset ? 1 : 0, next))
+    selectedIndex = Util.clamp(selectedIndex + delta, -1, canRestore ? 1 : 0)
   }
 
   function activateCursor() {
-    if (selectedIndex === 0) root.setAuto(!root.autoEnabled)
-    else if (selectedIndex === 1 && root.service) root.service.clearOffset()
+    if (!service) return
+    if (selectedIndex === 0) service.setEnabled(!autoEnabled)
+    else if (selectedIndex === 1) service.clearOffset()
   }
 
   onOpenedChanged: {
     if (opened) {
       bindService()
-      refresh()
       selectedIndex = -1
       cursorActive = false
     }
   }
 
-  // Follow the controller's ramp live while auto is on.
   Connections {
     target: root.service
     function onBrightnessChanged() {
-      if (!root.autoEnabled || brightnessSlider.dragging) return
-      var value = root.service.brightness
-      if (value > 0) root.brightnessPercent = value
+      if (!brightnessSlider.dragging && root.service.brightness > 0)
+        root.brightnessPercent = root.service.brightness
     }
   }
 
@@ -116,24 +90,8 @@ Panel {
   implicitWidth: available ? button.implicitWidth : 0
   implicitHeight: available ? button.implicitHeight : 0
 
-  Timer {
-    interval: 5000
-    running: root.opened
-    repeat: true
-    onTriggered: root.refresh()
-  }
-
-  Process {
-    id: stateProc
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var value = parseInt(String(text || "").trim(), 10)
-        if (!isNaN(value) && !brightnessSlider.dragging) root.brightnessPercent = Math.max(0, Math.min(100, value))
-      }
-    }
-  }
-
+  // Dragging sends at most one value per beat; the controller writes at most
+  // one per poll anyway.
   Timer {
     id: brightnessDebounce
     interval: 180
@@ -141,20 +99,11 @@ Panel {
     onTriggered: root.setBrightness(root.brightnessPercent)
   }
 
-  Process {
-    id: setBrightnessProc
-    stdout: StdioCollector { waitForEnd: true }
-    onRunningChanged: {
-      if (running) return
-      if (root.brightnessSetQueued) root.setBrightness(root.pendingBrightnessPercent)
-    }
-  }
-
   BarIconButton {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.autoEnabled ? "󰃟" : "󰃠"
+    text: root.icon
     onPressed: function(b) { root.toggle() }
     onWheelMoved: function(delta) {
       var wheel = Util.wheelSteps(root.wheelAccumulator, delta)
@@ -195,16 +144,12 @@ Panel {
         PanelHero {
           width: parent.width
           title: "Brightness"
-          meta: {
-            if (!root.service) return "Starting"
-            if (root.service.error) return root.service.error
-            return Math.round(root.service.lux) + " lux"
-          }
+          meta: !root.service ? "Starting" : (root.service.error || root.lux + " lux")
           foreground: root.bar.foreground
           fontFamily: root.bar.fontFamily
           iconComponent: Component {
             Text {
-              text: root.autoEnabled ? "󰃟" : "󰃠"
+              text: root.icon
               color: root.bar.foreground
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.display
@@ -216,7 +161,7 @@ Panel {
 
               // Back to the curve. Only while an offset is set.
               Button {
-                visible: root.autoEnabled && root.offset !== 0
+                visible: root.canRestore
                 iconText: "\u{F099B}"
                 tooltipText: "Back to the curve, dropping " + (root.offset > 0 ? "+" : "") + root.offset
                 bordered: true
@@ -224,9 +169,7 @@ Panel {
                 fontFamily: root.bar.fontFamily
                 hasCursor: root.cursorActive && root.selectedIndex === 1
                 anchors.verticalCenter: parent.verticalCenter
-                onHovered: function(on) {
-                  if (on) { root.cursorActive = true; root.selectedIndex = 1 }
-                }
+                onHovered: function(on) { if (on) root.focusCursor(1) }
                 onClicked: root.service.clearOffset()
               }
 
@@ -239,10 +182,8 @@ Panel {
                 fontFamily: root.bar.fontFamily
                 hasCursor: root.cursorActive && root.selectedIndex === 0
                 anchors.verticalCenter: parent.verticalCenter
-                onHovered: function(on) {
-                  if (on) { root.cursorActive = true; root.selectedIndex = 0 }
-                }
-                onClicked: root.setAuto(!root.autoEnabled)
+                onHovered: function(on) { if (on) root.focusCursor(0) }
+                onClicked: root.service.setEnabled(!root.autoEnabled)
               }
             }
           }
@@ -283,7 +224,7 @@ Panel {
             }
 
             HoverHandler {
-              onHoveredChanged: if (hovered) { root.cursorActive = true; root.selectedIndex = -1 }
+              onHoveredChanged: if (hovered) root.focusCursor(-1)
             }
           }
 

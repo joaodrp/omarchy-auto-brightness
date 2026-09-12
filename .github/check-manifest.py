@@ -16,11 +16,7 @@ REQUIRED = ("schemaVersion", "id", "name", "version", "author", "description",
             "kinds", "entryPoints")
 
 errors = []
-
-
-def fail(msg):
-    errors.append(msg)
-
+fail = errors.append
 
 manifest = json.loads((ROOT / "manifest.json").read_text())
 
@@ -53,13 +49,10 @@ readme = (ROOT / "README.md").read_text()
 section = re.search(r"^## Settings$(.*?)^## ", readme, re.MULTILINE | re.DOTALL)
 if section is None:
     fail("the README has no Settings section to compare against")
-    section_text = ""
-else:
-    section_text = section.group(1)
+section_text = section.group(1) if section else ""
 documented = set(re.findall(r"^\| `([a-zA-Z]+)` \|", section_text, re.MULTILINE))
-for key in schema:
-    if key not in documented:
-        fail(f"setting {key!r} is in manifest.json but not in the README table")
+for key in set(schema) - documented:
+    fail(f"setting {key!r} is in manifest.json but not in the README table")
 for key in documented - set(schema):
     fail(f"the README documents a setting {key!r} that manifest.json does not have")
 

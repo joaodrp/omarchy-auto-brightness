@@ -1,11 +1,11 @@
 import QtQuick
 import Quickshell.Io
 
-// Owns the auto brightness controller. The desired state lives inline on this
-// plugin's shell.json entry as `auto` (default on) and `offset` (default 0),
-// which a manual change while auto is on rewrites through the controller;
-// live readings come back from the controller as JSON lines, and manual
-// brightness changes go down to it over stdin so it can learn them.
+// Owns the auto brightness controller. Settings live inline on this plugin's
+// shell.json entry as `auto` (default on) and `offset` (default 0) and are
+// pushed to the controller over stdin; every change, from the panel, Setup,
+// IPC or a hotkey the controller noticed, goes through shell.json so there is
+// one path. Live readings come back as JSON lines.
 Item {
   id: root
 
@@ -23,8 +23,7 @@ Item {
   property real target: 0
   property string error: "Starting"
 
-  property bool expectedStop: false
-  property bool restartPending: false
+  property bool tearingDown: false
 
   function configEntry() {
     var config = shell?.shellConfig
@@ -41,103 +40,54 @@ Item {
     return ({})
   }
 
-  function readSettings() {
-    var entry = configEntry()
-    return {
-      enabled: entry.auto !== false,
-      offset: Number.isInteger(entry.offset) ? entry.offset : 0
-    }
+  function send(line) {
+    if (controller.running) controller.write(line + "\n")
   }
 
+  // Read the persisted settings and push them. Idempotent, so it runs on
+  // every config change and right after the controller starts.
   function syncSettings() {
-    var next = readSettings()
-    var changed = enabled !== next.enabled || offset !== next.offset
-    enabled = next.enabled
-    offset = next.offset
-    if (changed) restartController()
+    var entry = configEntry()
+    enabled = entry.auto !== false
+    offset = Number.isInteger(entry.offset) ? entry.offset : 0
+    send("auto " + (enabled ? "on" : "off"))
+    send("offset " + offset)
   }
 
   function persist(values) {
     if (!shell || !manifest) return
-    var entry = configEntry()
-    var merged = { id: manifest.id }
-    for (var key in entry) if (key !== "id") merged[key] = entry[key]
-    for (var name in values) merged[name] = values[name]
-    shell.updateEntryInline(manifest.id, merged)
+    shell.updateEntryInline(manifest.id, Object.assign({}, configEntry(), values, { id: manifest.id }))
   }
 
-  function setEnabled(value) {
-    value = value === true
-    if (enabled === value) return
-    enabled = value
-    persist({ auto: value })
-    restartController()
-  }
+  function setEnabled(value) { persist({ auto: value === true }) }
+  function setOffset(value) { persist({ offset: Math.round(Number(value)) }) }
+  function clearOffset() { setOffset(0) }
 
-  function toggle() { setEnabled(!enabled) }
+  // The user picked a brightness. The controller writes it, and with auto on
+  // turns it into the offset, which comes back in its status.
+  function setBrightness(percent) { send("manual " + Math.round(Number(percent))) }
 
-  // A brightness the user picked while auto is on. The controller turns it
-  // into the offset, which comes back in its status and is persisted there.
-  function noteManual(percent) {
-    if (!enabled || !controller.running) return
-    controller.write("manual " + Math.round(Number(percent)) + "\n")
-  }
-
-  // Clear the offset and go back to the curve.
-  function clearOffset() {
-    if (!controller.running) return
-    controller.write("forget\n")
-  }
-
-  // The controller always runs so the panel can show the toggle whenever the
-  // display and its sensor are present; `--paused` only stops it writing.
   function startController() {
     if (controller.running || !manifest?.__sourceDir) return
-    // The shell and the manifest arrive in either order; read the persisted
-    // settings now so the controller never starts with the defaults.
-    var current = readSettings()
-    enabled = current.enabled
-    offset = current.offset
-    expectedStop = false
-    var command = [
-      "setpriv", "--pdeathsig", "TERM",
-      manifest.__sourceDir + "/controller",
-      "--offset", String(offset)
-    ]
-    if (!enabled) command.push("--paused")
-    controller.command = command
+    controller.command = ["setpriv", "--pdeathsig", "TERM", manifest.__sourceDir + "/controller"]
     controller.running = true
-  }
-
-  function restartController() {
-    restartTimer.stop()
-    if (controller.running) {
-      expectedStop = true
-      restartPending = true
-      controller.running = false
-    } else {
-      startController()
-    }
+    syncSettings()
   }
 
   function applyStatus(line) {
-    // A process being stopped can still flush a line; it must not win over
-    // the settings the restart is about to apply.
-    if (expectedStop) return
     try {
       var status = JSON.parse(String(line))
       hardwareAvailable = status.available === true
-      monitor = status.monitor || ""
-      if (typeof status.lux === "number") lux = status.lux
-      if (typeof status.brightness === "number") brightness = status.brightness
-      if (typeof status.target === "number") target = status.target
-      if (typeof status.offset === "number" && status.offset !== offset) {
-        // Set before persisting so the config change is not seen as a new
-        // value that restarts the controller.
+      monitor = status.monitor
+      lux = status.lux
+      brightness = status.brightness
+      target = status.target
+      error = status.error
+      if (status.offset !== offset) {
+        // Set before persisting so the config change reads as already known.
         offset = status.offset
         persist({ offset: status.offset })
       }
-      error = status.error || ""
     } catch (e) {
       error = "Invalid controller status"
     }
@@ -147,21 +97,9 @@ Item {
     id: controller
     stdinEnabled: true
     stdout: SplitParser { onRead: function(line) { root.applyStatus(line) } }
-    stderr: SplitParser {
-      onRead: function(line) {
-        var message = String(line).trim()
-        if (message !== "") root.error = message
-      }
-    }
+    stderr: SplitParser { onRead: function(line) { console.warn("auto-brightness controller: " + line) } }
     onExited: function(exitCode) {
-      if (root.expectedStop) {
-        root.expectedStop = false
-        if (root.restartPending) {
-          root.restartPending = false
-          root.startController()
-        }
-        return
-      }
+      if (root.tearingDown) return
       root.error = "Controller exited (" + exitCode + ")"
       restartTimer.restart()
     }
@@ -199,14 +137,13 @@ Item {
     }
     function enable(): string { root.setEnabled(true); return "enabled" }
     function disable(): string { root.setEnabled(false); return "disabled" }
-    function toggle(): string { root.toggle(); return root.enabled ? "enabled" : "disabled" }
+    function toggle(): string { root.setEnabled(!root.enabled); return root.enabled ? "disabled" : "enabled" }
     function forget(): string { root.clearOffset(); return "forgot" }
   }
 
   Component.onDestruction: {
+    tearingDown = true
     restartTimer.stop()
-    expectedStop = true
-    restartPending = false
     controller.running = false
   }
 }
