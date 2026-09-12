@@ -41,7 +41,7 @@ qs log -p "$OMARCHY_PATH/shell" --tail 60   # QML errors land here, and only wit
 ```sh
 ./controller --self-test           # curve, hysteresis, debounce, ramp, offset
 omarchy plugin validate "$PWD"
-python3 .github/check-manifest.py  # manifest, README table and Panel.qml reads agree
+python3 .github/check-manifest.py  # manifest, README table and Service.qml reads agree
 
 # QML lint needs an import dir holding a `qs` symlink to the shell
 mkdir -p /tmp/qslint && ln -sfn "$OMARCHY_PATH/shell" /tmp/qslint/qs

@@ -121,6 +121,9 @@ Item {
   }
 
   function applyStatus(line) {
+    // A process being stopped can still flush a line; it must not win over
+    // the settings the restart is about to apply.
+    if (expectedStop) return
     try {
       var status = JSON.parse(String(line))
       hardwareAvailable = status.available === true

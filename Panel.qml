@@ -56,7 +56,13 @@ Panel {
     var percent = Math.max(1, Math.min(100, Math.round(Number(value))))
     root.brightnessPercent = percent
     root.pendingBrightnessPercent = percent
-    if (root.autoEnabled) root.service.noteManual(percent)
+
+    // With Auto on the controller learns the value and writes it itself, so
+    // the two never race for the display.
+    if (root.autoEnabled) {
+      root.service.noteManual(percent)
+      return
+    }
 
     if (setBrightnessProc.running) {
       root.brightnessSetQueued = true
@@ -79,7 +85,7 @@ Panel {
 
   function moveCursor(delta) {
     var next = selectedIndex + delta
-    selectedIndex = Math.max(-1, Math.min(root.offset ? 1 : 0, next))
+    selectedIndex = Math.max(-1, Math.min(root.autoEnabled && root.offset ? 1 : 0, next))
   }
 
   function activateCursor() {

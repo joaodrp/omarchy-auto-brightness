@@ -16,13 +16,15 @@
 # clears it. The service persists it, and passes it back on start.
 
 set -u
+export LC_ALL=C  # printf %.1f must emit a dot, whatever the session locale
 
 als_scale=0.001  # the HID ALS reports millilux: ~10000 raw in a dim evening room
 poll_interval=0.5
-# ponytail: each read-back is a `sudo asdcontrol` call that lands in the
-# journal; shorten it if hotkey changes feel slow to register.
+# Idle read-back interval. Every read-back is a `sudo asdcontrol` call that
+# lands in the journal. Before any write there is always a read-back, so a
+# hotkey press is never overwritten; while idle this is how often one is
+# noticed.
 manual_check_interval=10
-write_check_interval=2   # and never overwrite a hotkey change older than this
 lux_ema_alpha=0.25
 brighten_threshold=0.10  # accept a brighter room at 10% above the accepted lux
 darken_threshold=0.20    # and a darker one at 20% below
@@ -59,13 +61,13 @@ done
 
 # One awk pass over the whole pipeline. Inputs and outputs are the loop state,
 # so bash never does floating point.
-#   in:  lux filtered accepted pending_dir pending_since now brightness
-#   out: filtered accepted pending_dir pending_since brightness curve target desired
+#   in:  lux filtered accepted pending_dir pending_since now brightness ramp_target ramp_span
+#   out: filtered accepted pending_dir pending_since brightness curve target desired ramp_target ramp_span
 calculate() {
   awk \
     -v lux="$1" -v filtered="$2" -v accepted="$3" \
     -v pending_dir="$4" -v pending_since="$5" -v now="$6" \
-    -v brightness="$7" \
+    -v brightness="$7" -v ramp_target="${8:-}" -v ramp_span="${9:-0}" \
     -v offset="$offset" \
     -v lux_alpha="$lux_ema_alpha" \
     -v up_threshold="$brighten_threshold" -v down_threshold="$darken_threshold" \
@@ -113,88 +115,112 @@ calculate() {
       base_target = curve(accepted)
       target = clamp(base_target + offset)
 
-      if (brightness == "") brightness = target
+      if (brightness == "") { brightness = target; ramp_target = target; ramp_span = 0 }
       else {
         delta = target - brightness
         span = delta < 0 ? -delta : delta
+        # The cap is measured from where the ramp started, so a large change
+        # really does finish within it instead of decaying towards it.
+        if (ramp_target == "" || target != ramp_target + 0) { ramp_target = target; ramp_span = span }
         rate = delta > 0 ? up_rate : down_rate
         cap = delta > 0 ? up_cap : down_cap
         step = rate * poll
-        if (span / cap * poll > step) step = span / cap * poll
+        if (ramp_span * poll / cap > step) step = ramp_span * poll / cap
         brightness = span <= step ? target : brightness + (delta > 0 ? step : -step)
       }
       desired = int(clamp(brightness) + 0.5)
 
-      printf "%.10f %.10f %d %d %.10f %.10f %.10f %d\n", \
-        filtered, accepted, pending_dir, pending_since, brightness, base_target, target, desired
+      printf "%.10f %.10f %d %d %.10f %.10f %.10f %d %.10f %.10f\n", \
+        filtered, accepted, pending_dir, pending_since, brightness, base_target, target, desired, ramp_target, ramp_span
     }'
 }
 
 # A brightness the user chose becomes the offset from the curve as it stands
-# now, and the ramp restarts from that value.
+# now, and the ramp restarts from that value. `applied` says the display is
+# already there (a hotkey); otherwise the next pass writes it.
 learn_manual() {
-  local value="$1"
+  local value="$1" applied="${2:-0}"
   [[ $value =~ ^[0-9]+$ ]] || return
   offset=$(awk -v v="$value" -v b="${base_target:-$value}" 'BEGIN { printf "%d", v - b + (v - b < 0 ? -0.5 : 0.5) }')
   brightness=$value
-  last_applied=$value
+  ramp_target=""
+  (( applied )) && last_applied=$value
   last_manual_check=$SECONDS
 }
 
 if (( self_test )); then
   fail() { echo "self-test: $*" >&2; exit 1; }
   # Curve anchors and the offset knob.
-  read -r _ _ _ _ _ base target desired <<<"$(calculate 20 "" "" 0 0 0 "" 0)"
+  read -r _ _ _ _ _ base target desired _ _ <<<"$(calculate 20 "" "" 0 0 0 "" 0)"
   [[ $desired == 14 ]] || fail "curve(20) gave $desired, want 14"
   offset=-10
-  read -r _ _ _ _ _ _ _ desired <<<"$(calculate 0 "" "" 0 0 0 "" 0)"
+  read -r _ _ _ _ _ _ _ desired _ _ <<<"$(calculate 0 "" "" 0 0 0 "" 0)"
   [[ $desired == 1 ]] || fail "curve(0)-10 should clamp to 1, got $desired"
   offset=10
-  read -r _ _ _ _ _ _ _ desired <<<"$(calculate 5000 "" "" 0 0 0 "" 0)"
+  read -r _ _ _ _ _ _ _ desired _ _ <<<"$(calculate 5000 "" "" 0 0 0 "" 0)"
   [[ $desired == 100 ]] || fail "curve(5000)+10 should clamp to 100, got $desired"
   offset=0
   # The offset adds on top of the curve and is reported separately from it.
   offset=6
-  read -r _ _ _ _ _ base target _ <<<"$(calculate 20 "" "" 0 0 0 "")"
+  read -r _ _ _ _ _ base target _ _ _ <<<"$(calculate 20 "" "" 0 0 0 "")"
   [[ $base == 14.0000000000 && $target == 20.0000000000 ]] || fail "offset not applied: $base $target"
   offset=0
   # A jump to 100 lux from an accepted 10 is not taken before the debounce.
-  read -r filtered accepted dir since _ _ _ _ <<<"$(calculate 100 10 10 0 0 0 20 0)"
+  read -r filtered accepted dir since _ _ _ _ _ _ <<<"$(calculate 100 10 10 0 0 0 20 0)"
   [[ $accepted == 10.0000000000 && $dir == 1 ]] || fail "brighten accepted too early: $accepted dir=$dir"
-  read -r _ accepted dir _ _ _ _ _ <<<"$(calculate 100 90 10 1 0 3 20 0)"
+  read -r _ accepted dir _ _ _ _ _ _ _ <<<"$(calculate 100 90 10 1 0 3 20 0)"
   [[ $accepted == 10.0000000000 ]] || fail "brighten accepted at 3 s, want 4: $accepted"
-  read -r _ accepted dir _ _ _ _ _ <<<"$(calculate 100 90 10 1 0 4 20 0)"
+  read -r _ accepted dir _ _ _ _ _ _ _ <<<"$(calculate 100 90 10 1 0 4 20 0)"
   [[ $accepted != 10.0000000000 && $dir == 0 ]] || fail "brighten not accepted at 4 s: $accepted"
   # Darkening waits longer.
-  read -r _ accepted _ _ _ _ _ _ <<<"$(calculate 1 1 100 -1 0 7 40 0)"
+  read -r _ accepted _ _ _ _ _ _ _ _ <<<"$(calculate 1 1 100 -1 0 7 40 0)"
   [[ $accepted == 100.0000000000 ]] || fail "darken accepted at 7 s, want 8: $accepted"
-  read -r _ accepted _ _ _ _ _ _ <<<"$(calculate 1 1 100 -1 0 8 40 0)"
+  read -r _ accepted _ _ _ _ _ _ _ _ <<<"$(calculate 1 1 100 -1 0 8 40 0)"
   [[ $accepted == 1.0000000000 ]] || fail "darken not accepted at 8 s: $accepted"
   # Small wobble inside the band changes nothing.
-  read -r _ accepted dir _ _ _ _ _ <<<"$(calculate 105 105 100 0 0 30 40 0)"
+  read -r _ accepted dir _ _ _ _ _ _ _ <<<"$(calculate 105 105 100 0 0 30 40 0)"
   [[ $accepted == 100.0000000000 && $dir == 0 ]] || fail "5% wobble was not ignored: $accepted dir=$dir"
   # The ramp: an 80-point brighten completes in the 2 s cap, so 20 per poll.
-  read -r _ _ _ _ _ _ _ desired <<<"$(calculate 5000 5000 5000 0 0 0 20 0)"
+  read -r _ _ _ _ _ _ _ desired _ _ <<<"$(calculate 5000 5000 5000 0 0 0 20 0)"
   (( desired == 40 )) || fail "brighten step should be 20 points, got $((desired - 20))"
   # A 39-point dim takes the 3 s cap: 6.5 per poll.
-  read -r _ _ _ _ _ _ _ desired <<<"$(calculate 0 0 0 0 0 0 40 0)"
+  read -r _ _ _ _ _ _ _ desired _ _ <<<"$(calculate 0 0 0 0 0 0 40 0)"
   (( desired == 34 )) || fail "dim step should be 6.5 points, got $((40 - desired))"
   # A small change lands in one poll.
-  read -r _ _ _ _ _ _ _ desired <<<"$(calculate 0 0 0 0 0 0 9 0)"
+  read -r _ _ _ _ _ _ _ desired _ _ <<<"$(calculate 0 0 0 0 0 0 9 0)"
   (( desired == 5 )) || fail "small change should land at once, got $desired"
   # A manual 30% at a 14% curve point becomes a +16 offset.
-  base_target=14; accepted_lux=20; learn_manual 30
-  (( offset == 16 && brightness == 30 )) || fail "manual 30 over curve 14 gave offset $offset"
+  base_target=14; accepted_lux=20; last_applied=14; learn_manual 30
+  (( offset == 16 && brightness == 30 && last_applied == 14 )) || fail "manual 30 over curve 14 gave offset $offset"
+  learn_manual 30 1
+  (( last_applied == 30 )) || fail "an applied manual change should update last_applied"
+  # A big change finishes within the cap: 20 -> 100 in 4 polls (2 s).
+  offset=0; b=20; rt=""; rs=0
+  for i in 1 2 3 4; do
+    read -r _ _ _ _ b _ _ d rt rs <<<"$(calculate 5000 5000 5000 0 0 0 "$b" "$rt" "$rs")"
+  done
+  (( d == 100 )) || fail "brighten did not finish within the 2 s cap: $d"
+  b=100; rt=""; rs=0
+  for i in 1 2 3 4 5 6; do
+    read -r _ _ _ _ b _ _ d rt rs <<<"$(calculate 0 0 0 0 0 0 "$b" "$rt" "$rs")"
+  done
+  (( d == 5 )) || fail "dim did not finish within the 3 s cap: $d"
   echo ok
   exit 0
 fi
 
+# The same test omarchy-brightness-display uses to route to asdcontrol, so
+# the output chosen here is the one the writes will reach.
 detect_monitor() {
-  timeout 5 hyprctl monitors -j 2>/dev/null | jq -er '
-    first(.[] | select(
-      (.disabled != true)
-      and ((.make // "") | ascii_downcase | contains("apple"))
-    ) | .name)'
+  local name
+  while read -r name; do
+    [[ -n $name ]] || continue
+    if omarchy-hyprland-monitor-focused-apple "$name" 2>/dev/null; then
+      printf '%s\n' "$name"
+      return 0
+    fi
+  done < <(timeout 5 hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.disabled != true) | .name')
+  return 1
 }
 
 # The display's ALS shows up as a HID sensor hub under the Apple USB device
@@ -219,13 +245,15 @@ read_brightness() {
 }
 
 # Someone else moved the brightness since we last wrote it: learn it.
+# Returns 0 when learned, 1 when unchanged, 2 when the display could not be
+# read, in which case nothing should be written either.
 learn_external_change() {
   local current
-  (( last_applied > 0 )) || return 1
-  current=$(read_brightness) || return 1
   last_manual_check=$SECONDS
+  (( last_applied > 0 )) || return 1
+  current=$(read_brightness) || return 2
   (( current != last_applied )) || return 1
-  learn_manual "$current"
+  learn_manual "$current" 1
 }
 
 emit_status() {
@@ -244,6 +272,8 @@ reset_state() {
   pending_since=0
   brightness=""
   base_target=""
+  ramp_target=""
+  ramp_span=0
   last_applied=0
   last_manual_check=0
 }
@@ -276,6 +306,7 @@ while true; do
   if ! raw=$(<"$sensor") || [[ ! $raw =~ ^[0-9]+$ ]]; then
     emit_status false "Could not read the ambient light sensor"
     sensor=""
+    monitor=""
     sleep "$poll_interval"
     continue
   fi
@@ -290,8 +321,8 @@ while true; do
     fi
   fi
 
-  read -r filtered_lux accepted_lux pending_dir pending_since brightness base_target target desired <<<"$(
-    calculate "$lux" "$filtered_lux" "$accepted_lux" "$pending_dir" "$pending_since" "$SECONDS" "$brightness"
+  read -r filtered_lux accepted_lux pending_dir pending_since brightness base_target target desired ramp_target ramp_span <<<"$(
+    calculate "$lux" "$filtered_lux" "$accepted_lux" "$pending_dir" "$pending_since" "$SECONDS" "$brightness" "$ramp_target" "$ramp_span"
   )"
 
   if (( paused )); then
@@ -300,14 +331,15 @@ while true; do
     continue
   fi
 
-  since_check=$(( SECONDS - last_manual_check ))
-  if (( since_check >= manual_check_interval )) \
-      || (( desired != last_applied && since_check >= write_check_interval )); then
-    if learn_external_change; then
-      emit_status true ""
-      sleep "$poll_interval"
-      continue
-    fi
+  if (( desired != last_applied || SECONDS - last_manual_check >= manual_check_interval )); then
+    learn_external_change
+    case $? in
+      0 | 2)
+        emit_status true ""
+        sleep "$poll_interval"
+        continue
+        ;;
+    esac
   fi
 
   if (( desired != last_applied )); then

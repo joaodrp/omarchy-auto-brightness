@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check manifest.json against the repository, the README and Panel.qml.
+"""Check manifest.json against the repository, the README and Service.qml.
 
 The marketplace reads the manifest, the README documents it, and the panel
 reads the settings by key. None of them notices when the others drift, so
@@ -63,17 +63,14 @@ for key in schema:
 for key in documented - set(schema):
     fail(f"the README documents a setting {key!r} that manifest.json does not have")
 
-# The panel reads each setting by string key, and its fallback is the
-# manifest default typed again. A key that is read but not declared, or
-# declared with one default and read with another, is a silent divergence.
-panel = (ROOT / manifest["entryPoints"]["barWidget"]).read_text()
-for key, default in re.findall(r'root\.setting\("([a-zA-Z]+)",\s*([^)]+)\)', panel):
-    if key not in schema:
-        fail(f"Panel.qml reads setting {key!r}, which manifest.json does not declare")
-        continue
-    if json.loads(default) != defaults[key]:
-        fail(f"Panel.qml falls back to {default} for {key!r}; manifest.json says "
-             f"{defaults[key]!r}")
+# The service reads each setting off the shell.json entry by key. A key that
+# is read but not declared, or declared but never read, is a silent divergence.
+service = (ROOT / manifest["entryPoints"]["service"]).read_text()
+read_keys = set(re.findall(r"\bentry\.([a-zA-Z]+)\b", service)) - {"id"}
+for key in read_keys - set(schema):
+    fail(f"Service.qml reads setting {key!r}, which manifest.json does not declare")
+for key in set(schema) - read_keys:
+    fail(f"setting {key!r} is declared in manifest.json but Service.qml never reads it")
 
 if errors:
     for line in errors:
