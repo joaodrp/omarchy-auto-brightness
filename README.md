@@ -76,10 +76,9 @@ change:
 | Sensor discovery | IIO `als` device under the Apple USB path | Any IIO illuminance device, preferring one attached to the display |
 | Lux unit | Fixed 0.001, because the Apple sensor reports millilux while the kernel scale reads 1.0 | Per-sensor: Apple gets 0.001, everything else the kernel's `in_illuminance_scale` |
 
-The curve is anchored in nits, so a laptop panel needs its own anchors but
+The curve is anchored in nits, so another panel needs its own anchors but
 not a new structure. Hysteresis, debounce, ramp and learning carry over
-unchanged. Contributions with a display to test on are welcome; the
-Framework Laptop 13 is the obvious first candidate.
+unchanged. Contributions with a display to test on are welcome.
 
 Omarchy has open pull requests for built-in auto brightness. If one lands,
 this plugin will shrink to whatever the built-in version does not cover.
