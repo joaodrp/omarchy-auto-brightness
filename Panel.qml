@@ -10,8 +10,8 @@ import qs.Commons
 // Apple display with a light sensor is connected.
 Panel {
   id: root
-  moduleName: "io.github.joaodrp.studio-display"
-  ipcTarget: "io.github.joaodrp.studio-display"
+  moduleName: "io.github.joaodrp.auto-brightness"
+  ipcTarget: "io.github.joaodrp.auto-brightness"
 
   property var service: null
   readonly property bool available: !!service && service.hardwareAvailable

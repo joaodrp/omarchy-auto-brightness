@@ -158,7 +158,7 @@ Item {
   onManifestChanged: startController()
 
   IpcHandler {
-    target: "studio-display"
+    target: "auto-brightness"
 
     function status(): string {
       return JSON.stringify({

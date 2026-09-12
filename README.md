@@ -26,11 +26,11 @@ Display panel is left as it is.
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/joaodrp/omarchy-studio-display.git --enable
+omarchy plugin add https://github.com/joaodrp/omarchy-auto-brightness.git --enable
 ```
 
 The widget lands in the right section of the bar. Move it with
-`omarchy plugin enable io.github.joaodrp.studio-display --section left`.
+`omarchy plugin enable io.github.joaodrp.auto-brightness --section left`.
 
 ## Settings
 
@@ -44,8 +44,8 @@ Inline on the plugin's entry in `~/.config/omarchy/shell.json`:
 IPC, for keybindings or scripts:
 
 ```sh
-omarchy-shell studio-display status
-omarchy-shell studio-display toggle   # also enable / disable
+omarchy-shell auto-brightness status
+omarchy-shell auto-brightness toggle   # also enable / disable
 ```
 
 ## How it works
@@ -83,7 +83,7 @@ over stdin; hotkey changes are picked up by the next brightness read-back.
 | `Panel.qml`     | The bar icon and panel: slider, Auto chip, lux readout.               |
 
 The loop structure started from
-[miharekar/omarchy-studio-display-auto-brightness](https://github.com/miharekar/omarchy-studio-display-auto-brightness),
+[miharekar/omarchy-auto-brightness-auto-brightness](https://github.com/miharekar/omarchy-auto-brightness-auto-brightness),
 which needs the XDR's two sensors. The hysteresis, debounce and learning
 follow the design Android documents in `AutomaticBrightnessController`.
 
