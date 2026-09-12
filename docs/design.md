@@ -90,8 +90,8 @@ the sRGB point with exponent 0.5 gives about 34 nits at 10 lux, 80 at
 a power function for preferred luminance; a reading-comfort study found
 low ambient light favoured lower luminance with a strong interaction
 between the two. The anchors above sit between that heuristic and the
-display's own idea of dim, because the learned correction (stage 6) and
-the `offset` setting absorb personal preference. They were tuned by eye
+display's own idea of dim, because the offset (stage 6) absorbs personal
+preference. They were tuned by eye
 against these references, not with a light meter.
 
 The previous table, inherited from an XDR plugin, floored at 12%, about
@@ -130,21 +130,29 @@ separate events. The earlier exponential ramp spread a 40-point dim over
 
 ### 6. Learning from manual changes
 
-A manual change while auto is on becomes an offset, chosen minus
-curve(lux), added to the curve until it expires: after 4 h, or when the
-accepted lux moves more than a factor of 4 from where it was learned.
+A manual change while auto is on becomes the offset: chosen minus
+curve(lux) at that moment. It is added to the curve at every light level
+from then on, persisted with the plugin's settings, and cleared only by
+the user, through the restore button or the setting.
 
-Android's short-term model records the (lux, chosen brightness) pair and
-biases the mapping around that lux, discarding it after a configurable
-timeout (`AutomaticBrightnessController`, `BrightnessMappingStrategy`).
-macOS keeps auto on when the keys are pressed and treats the change as a
-bias around the current ambient level; the display returns near the
-chosen level when the room returns to that light. KDE Plasma 6 does the
-same with six calibration points that a manual change re-fits. No
-shipping system turns auto off on a keypress.
+Android's short-term model records the (lux, chosen brightness) pair,
+biases the mapping around that lux, and discards it after a configurable
+timeout. macOS keeps auto on when the keys are pressed, treats the change
+as a bias, and by observation never expires it by the clock; the display
+returns near the chosen level when the room returns to that light. KDE
+Plasma 6 refits one of six calibration points. No shipping system turns
+auto off on a keypress.
 
-The 4 h and 4x figures are ours. Android leaves the timeout to the
-device configuration.
+This plugin keeps the correction indefinitely, and at every light level
+rather than near the one it was learned at. Both are deliberate. A desk
+display does not move between rooms the way a phone does, so the
+timeout Android needs would only surprise: the same room at one in the
+morning should not snap back from a level chosen at nine. A single
+offset rather than a per-lux one is the simplest model that matches how
+people describe the preference, "a bit brighter than it picks", and it
+is visible and reversible in one place. An earlier version expired the
+correction after four hours or a fourfold change in light; the timer had
+no justification and was removed.
 
 ## Alternatives considered
 
@@ -161,8 +169,8 @@ device configuration.
   light meter reading at two percentages would settle it.
 - The curve anchors between 200 and 5000 lux have not been lived with;
   the room this was built in never exceeds about 100 lux.
-- Whether the learned correction should decay gradually rather than
-  expire at once.
+- Whether a per-lux correction, as Android and Plasma keep, would beat a
+  single offset once someone lives with it across a full day of light.
 
 ## Sources
 

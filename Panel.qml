@@ -23,10 +23,10 @@ Panel {
   property bool brightnessSetQueued: false
   property real wheelAccumulator: 0
 
-  readonly property int learned: service ? service.learned : 0
+  readonly property int offset: service ? service.offset : 0
 
   // Keyboard cursor: -1 is the slider, 0 the Auto chip, 1 the restore button
-  // while a correction is learned.
+  // while an offset is set.
   property bool cursorActive: false
   property int selectedIndex: -1
 
@@ -49,8 +49,7 @@ Panel {
 
   function chipText() {
     if (!autoEnabled) return "Manual"
-    var learned = service ? service.learned : 0
-    return "Auto" + (learned ? (learned > 0 ? " +" : " ") + learned : "")
+    return "Auto" + (root.offset ? (root.offset > 0 ? " +" : " ") + root.offset : "")
   }
 
   function setBrightness(value) {
@@ -80,12 +79,12 @@ Panel {
 
   function moveCursor(delta) {
     var next = selectedIndex + delta
-    selectedIndex = Math.max(-1, Math.min(root.learned ? 1 : 0, next))
+    selectedIndex = Math.max(-1, Math.min(root.offset ? 1 : 0, next))
   }
 
   function activateCursor() {
     if (selectedIndex === 0) root.setAuto(!root.autoEnabled)
-    else if (selectedIndex === 1 && root.service) root.service.forgetLearned()
+    else if (selectedIndex === 1 && root.service) root.service.clearOffset()
   }
 
   onOpenedChanged: {
@@ -209,11 +208,11 @@ Panel {
             Row {
               spacing: Style.space(6)
 
-              // Back to the curve. Only while a correction is learned.
+              // Back to the curve. Only while an offset is set.
               Button {
-                visible: root.autoEnabled && root.learned !== 0
+                visible: root.autoEnabled && root.offset !== 0
                 iconText: "\u{F099B}"
-                tooltipText: "Forget the " + (root.learned > 0 ? "+" : "") + root.learned + " correction"
+                tooltipText: "Back to the curve, dropping " + (root.offset > 0 ? "+" : "") + root.offset
                 bordered: true
                 foreground: root.bar.foreground
                 fontFamily: root.bar.fontFamily
@@ -222,7 +221,7 @@ Panel {
                 onHovered: function(on) {
                   if (on) { root.cursorActive = true; root.selectedIndex = 1 }
                 }
-                onClicked: root.service.forgetLearned()
+                onClicked: root.service.clearOffset()
               }
 
               Button {

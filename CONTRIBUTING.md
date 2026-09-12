@@ -36,13 +36,10 @@ omarchy-restart-shell
 qs log -p "$OMARCHY_PATH/shell" --tail 60   # QML errors land here, and only with -p
 ```
 
-A shell restart also restarts the controller, which forgets any learned
-correction.
-
 ## Checks
 
 ```sh
-./controller --self-test           # curve, hysteresis, debounce, ramp, expiry
+./controller --self-test           # curve, hysteresis, debounce, ramp, offset
 omarchy plugin validate "$PWD"
 python3 .github/check-manifest.py  # manifest, README table and Panel.qml reads agree
 
@@ -59,8 +56,8 @@ change rather than aiming for silence.
 The checks prove the maths and that the files parse. For the rest, watch it:
 
 ```sh
-omarchy-shell auto-brightness status          # lux, target, brightness, learned
-omarchy-brightness-display --monitor DP-3 40%  # a "hotkey" change; learned within 10 s
+omarchy-shell auto-brightness status          # lux, target, brightness, offset
+omarchy-brightness-display --monitor DP-3 40%  # a "hotkey" change; becomes the offset within 10 s
 omarchy-shell auto-brightness disable          # Manual
 ```
 

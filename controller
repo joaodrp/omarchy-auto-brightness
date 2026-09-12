@@ -5,14 +5,15 @@
 # Accepts "manual <percent>" and "forget" lines on stdin from the panel.
 #
 # Usage: controller [--offset N] [--paused] [--self-test]
-#   --offset N   shift the whole curve by N brightness points (calibration knob)
+#   --offset N   start with this correction, in brightness points
 #   --paused     track the sensor and report, but never write brightness
 #   --self-test  check the maths and exit
 #
 # Procedure, per 0.5 s poll (the shape Android documents and macOS shows):
 #   lux -> smoothing -> asymmetric hysteresis + debounce -> curve -> ramp
-# A manual change does not stop auto. It is learned as an offset at the
-# current light level and forgotten after a few hours or a big lux change.
+# A manual change does not stop auto. It becomes the offset: the distance
+# from the curve at that moment, kept at every light level until the user
+# clears it. The service persists it, and passes it back on start.
 
 set -u
 
@@ -34,8 +35,6 @@ brighten_rate=20
 brighten_cap=2
 dim_rate=13
 dim_cap=3
-learned_ttl=14400        # a manual correction lasts 4 h ...
-learned_lux_span=4       # ... or until the room changes by this factor
 
 # Lux anchors -> brightness percent, interpolated in log2(lux). One percent is
 # about 6 nits on this display (raw 400..60000 spans roughly 4..600 nits), so
@@ -60,13 +59,13 @@ done
 
 # One awk pass over the whole pipeline. Inputs and outputs are the loop state,
 # so bash never does floating point.
-#   in:  lux filtered accepted pending_dir pending_since now brightness learned
-#   out: filtered accepted pending_dir pending_since brightness base target desired
+#   in:  lux filtered accepted pending_dir pending_since now brightness
+#   out: filtered accepted pending_dir pending_since brightness curve target desired
 calculate() {
   awk \
     -v lux="$1" -v filtered="$2" -v accepted="$3" \
     -v pending_dir="$4" -v pending_since="$5" -v now="$6" \
-    -v brightness="$7" -v learned="$8" \
+    -v brightness="$7" \
     -v offset="$offset" \
     -v lux_alpha="$lux_ema_alpha" \
     -v up_threshold="$brighten_threshold" -v down_threshold="$darken_threshold" \
@@ -111,8 +110,8 @@ calculate() {
         }
       }
 
-      base_target = clamp(curve(accepted) + offset)
-      target = clamp(base_target + learned)
+      base_target = curve(accepted)
+      target = clamp(base_target + offset)
 
       if (brightness == "") brightness = target
       else {
@@ -131,14 +130,15 @@ calculate() {
     }'
 }
 
-learned_expired() {
-  awk -v now="$SECONDS" -v at="$learned_at" -v ttl="$learned_ttl" \
-      -v lux="$1" -v ref="$learned_lux" -v span="$learned_lux_span" '
-    BEGIN {
-      if (ref < 1) ref = 1
-      if (lux < 1) lux = 1
-      exit !(now - at >= ttl || lux > ref * span || lux < ref / span)
-    }'
+# A brightness the user chose becomes the offset from the curve as it stands
+# now, and the ramp restarts from that value.
+learn_manual() {
+  local value="$1"
+  [[ $value =~ ^[0-9]+$ ]] || return
+  offset=$(awk -v v="$value" -v b="${base_target:-$value}" 'BEGIN { printf "%d", v - b + (v - b < 0 ? -0.5 : 0.5) }')
+  brightness=$value
+  last_applied=$value
+  last_manual_check=$SECONDS
 }
 
 if (( self_test )); then
@@ -153,9 +153,11 @@ if (( self_test )); then
   read -r _ _ _ _ _ _ _ desired <<<"$(calculate 5000 "" "" 0 0 0 "" 0)"
   [[ $desired == 100 ]] || fail "curve(5000)+10 should clamp to 100, got $desired"
   offset=0
-  # Learned correction adds on top of the curve.
-  read -r _ _ _ _ _ base target _ <<<"$(calculate 20 "" "" 0 0 0 "" 6)"
-  [[ $base == 14.0000000000 && $target == 20.0000000000 ]] || fail "learned offset not applied: $base $target"
+  # The offset adds on top of the curve and is reported separately from it.
+  offset=6
+  read -r _ _ _ _ _ base target _ <<<"$(calculate 20 "" "" 0 0 0 "")"
+  [[ $base == 14.0000000000 && $target == 20.0000000000 ]] || fail "offset not applied: $base $target"
+  offset=0
   # A jump to 100 lux from an accepted 10 is not taken before the debounce.
   read -r filtered accepted dir since _ _ _ _ <<<"$(calculate 100 10 10 0 0 0 20 0)"
   [[ $accepted == 10.0000000000 && $dir == 1 ]] || fail "brighten accepted too early: $accepted dir=$dir"
@@ -180,12 +182,9 @@ if (( self_test )); then
   # A small change lands in one poll.
   read -r _ _ _ _ _ _ _ desired <<<"$(calculate 0 0 0 0 0 0 9 0)"
   (( desired == 5 )) || fail "small change should land at once, got $desired"
-  # Learned corrections expire on time or on a big change of light.
-  SECONDS=0; learned_at=0; learned_lux=100
-  learned_expired 100 && fail "learned offset expired immediately"
-  learned_expired 500 || fail "learned offset survived a 5x brighter room"
-  learned_expired 20 || fail "learned offset survived a 5x darker room"
-  learned_at=$(( -learned_ttl )); learned_expired 100 || fail "learned offset survived its TTL"
+  # A manual 30% at a 14% curve point becomes a +16 offset.
+  base_target=14; accepted_lux=20; learn_manual 30
+  (( offset == 16 && brightness == 30 )) || fail "manual 30 over curve 14 gave offset $offset"
   echo ok
   exit 0
 fi
@@ -231,22 +230,9 @@ learn_external_change() {
 
 emit_status() {
   local available="$1" error="$2"
-  printf '{"available":%s,"monitor":"%s","lux":%.1f,"brightness":%d,"target":%.1f,"learned":%d,"paused":%s,"error":"%s"}\n' \
+  printf '{"available":%s,"monitor":"%s","lux":%.1f,"brightness":%d,"target":%.1f,"offset":%d,"paused":%s,"error":"%s"}\n' \
     "$available" "$monitor" "${filtered_lux:-0}" "${last_applied:-0}" "${target:-0}" \
-    "$learned_offset" "$([[ $paused == 1 ]] && echo true || echo false)" "$error"
-}
-
-# A brightness the user chose becomes an offset from the curve at this light
-# level, and the ramp restarts from that value.
-learn_manual() {
-  local value="$1"
-  [[ $value =~ ^[0-9]+$ ]] || return
-  learned_offset=$(awk -v v="$value" -v b="${base_target:-$value}" 'BEGIN { printf "%d", v - b }')
-  learned_at=$SECONDS
-  learned_lux=${accepted_lux:-0}
-  brightness=$value
-  last_applied=$value
-  last_manual_check=$SECONDS
+    "$offset" "$([[ $paused == 1 ]] && echo true || echo false)" "$error"
 }
 
 reset_state() {
@@ -265,16 +251,13 @@ reset_state() {
 trap 'exit 0' TERM INT
 
 target=0
-learned_offset=0
-learned_at=0
-learned_lux=0
 reset_state
 
 while true; do
   while read -t 0.01 -r command argument; do
     case $command in
       manual) learn_manual "$argument" ;;
-      forget) learned_offset=0 ;;
+      forget) offset=0 ;;
     esac
   done
 
@@ -308,12 +291,8 @@ while true; do
   fi
 
   read -r filtered_lux accepted_lux pending_dir pending_since brightness base_target target desired <<<"$(
-    calculate "$lux" "$filtered_lux" "$accepted_lux" "$pending_dir" "$pending_since" "$SECONDS" "$brightness" "$learned_offset"
+    calculate "$lux" "$filtered_lux" "$accepted_lux" "$pending_dir" "$pending_since" "$SECONDS" "$brightness"
   )"
-
-  if (( learned_offset != 0 )) && learned_expired "$accepted_lux"; then
-    learned_offset=0
-  fi
 
   if (( paused )); then
     emit_status true ""

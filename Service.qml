@@ -2,7 +2,8 @@ import QtQuick
 import Quickshell.Io
 
 // Owns the auto brightness controller. The desired state lives inline on this
-// plugin's shell.json entry as `auto` (default on) and `offset` (default 0);
+// plugin's shell.json entry as `auto` (default on) and `offset` (default 0),
+// which a manual change while auto is on rewrites through the controller;
 // live readings come back from the controller as JSON lines, and manual
 // brightness changes go down to it over stdin so it can learn them.
 Item {
@@ -20,7 +21,6 @@ Item {
   property real lux: 0
   property int brightness: 0
   property real target: 0
-  property int learned: 0
   property string error: "Starting"
 
   property bool expectedStop: false
@@ -41,13 +41,19 @@ Item {
     return ({})
   }
 
-  function syncSettings() {
+  function readSettings() {
     var entry = configEntry()
-    var nextEnabled = entry.auto !== false
-    var nextOffset = Number.isInteger(entry.offset) ? entry.offset : 0
-    var changed = enabled !== nextEnabled || offset !== nextOffset
-    enabled = nextEnabled
-    offset = nextOffset
+    return {
+      enabled: entry.auto !== false,
+      offset: Number.isInteger(entry.offset) ? entry.offset : 0
+    }
+  }
+
+  function syncSettings() {
+    var next = readSettings()
+    var changed = enabled !== next.enabled || offset !== next.offset
+    enabled = next.enabled
+    offset = next.offset
     if (changed) restartController()
   }
 
@@ -70,15 +76,15 @@ Item {
 
   function toggle() { setEnabled(!enabled) }
 
-  // A brightness the user picked while auto is on. The controller keeps it
-  // as an offset from the curve at the current light level.
+  // A brightness the user picked while auto is on. The controller turns it
+  // into the offset, which comes back in its status and is persisted there.
   function noteManual(percent) {
     if (!enabled || !controller.running) return
     controller.write("manual " + Math.round(Number(percent)) + "\n")
   }
 
-  // Drop the learned offset and go back to the curve.
-  function forgetLearned() {
+  // Clear the offset and go back to the curve.
+  function clearOffset() {
     if (!controller.running) return
     controller.write("forget\n")
   }
@@ -87,6 +93,11 @@ Item {
   // display and its sensor are present; `--paused` only stops it writing.
   function startController() {
     if (controller.running || !manifest?.__sourceDir) return
+    // The shell and the manifest arrive in either order; read the persisted
+    // settings now so the controller never starts with the defaults.
+    var current = readSettings()
+    enabled = current.enabled
+    offset = current.offset
     expectedStop = false
     var command = [
       "setpriv", "--pdeathsig", "TERM",
@@ -117,7 +128,12 @@ Item {
       if (typeof status.lux === "number") lux = status.lux
       if (typeof status.brightness === "number") brightness = status.brightness
       if (typeof status.target === "number") target = status.target
-      if (typeof status.learned === "number") learned = status.learned
+      if (typeof status.offset === "number" && status.offset !== offset) {
+        // Set before persisting so the config change is not seen as a new
+        // value that restarts the controller.
+        offset = status.offset
+        persist({ offset: status.offset })
+      }
       error = status.error || ""
     } catch (e) {
       error = "Invalid controller status"
@@ -174,14 +190,14 @@ Item {
         lux: root.lux,
         brightness: root.brightness,
         target: root.target,
-        learned: root.learned,
+        offset: root.offset,
         error: root.error
       })
     }
     function enable(): string { root.setEnabled(true); return "enabled" }
     function disable(): string { root.setEnabled(false); return "disabled" }
     function toggle(): string { root.toggle(); return root.enabled ? "enabled" : "disabled" }
-    function forget(): string { root.forgetLearned(); return "forgot" }
+    function forget(): string { root.clearOffset(); return "forgot" }
   }
 
   Component.onDestruction: {
