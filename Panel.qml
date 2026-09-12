@@ -10,6 +10,7 @@ import qs.Commons
 Panel {
   id: root
   moduleName: "io.github.joaodrp.studio-display"
+  ipcTarget: "io.github.joaodrp.studio-display"
 
   property var service: null
   readonly property bool available: !!service && service.hardwareAvailable
