@@ -1,0 +1,8 @@
+# Keeps the SHA-pinned actions in the workflows current; the marketplace
+# review requires pins, and pins do not move on their own.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
