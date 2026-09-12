@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "io.github.joaodrp.studio-display",
-  "name": "Studio Display",
+  "name": "Brightness",
   "version": "0.1.0",
   "author": "João Pereira",
   "license": "MIT",
@@ -15,7 +15,7 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "Studio Display",
+    "displayName": "Brightness",
     "description": "Brightness slider with an Auto mode driven by the Studio Display's light sensor. Shows only while the display is connected.",
     "category": "Hardware",
     "allowMultiple": false,

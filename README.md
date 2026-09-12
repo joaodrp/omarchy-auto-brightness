@@ -1,4 +1,4 @@
-# Studio Display
+# Brightness
 
 A bar widget for the Apple Studio Display: a brightness slider and an
 **Auto** mode driven by the display's own ambient light sensor. The stock

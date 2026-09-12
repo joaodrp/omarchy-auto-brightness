@@ -4,7 +4,8 @@ import Quickshell.Io
 import qs.Ui
 import qs.Commons
 
-// Studio Display brightness: a slider, the Auto chip, and the room's light.
+// Brightness for the Apple Studio Display: a slider, the Auto chip, and
+// the room's light.
 // The stock Display panel is untouched; this widget only shows while an
 // Apple display with a light sensor is connected.
 Panel {
@@ -213,7 +214,7 @@ Panel {
             spacing: Style.space(2)
 
             Text {
-              text: "Studio Display"
+              text: "Brightness"
               color: root.bar.foreground
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.title
