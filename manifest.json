@@ -19,6 +19,27 @@
     "description": "Brightness slider with an Auto mode driven by the Studio Display's light sensor. Shows only while the display is connected.",
     "category": "Hardware",
     "allowMultiple": false,
-    "defaultSection": "right"
+    "defaultSection": "right",
+    "defaults": {
+      "auto": true,
+      "offset": 0
+    },
+    "schema": [
+      {
+        "key": "auto",
+        "type": "boolean",
+        "label": "Adjust brightness automatically",
+        "defaultValue": true
+      },
+      {
+        "key": "offset",
+        "type": "integer",
+        "label": "Shift the auto curve (brightness points)",
+        "min": -30,
+        "max": 30,
+        "step": 1,
+        "defaultValue": 0
+      }
+    ]
   }
 }

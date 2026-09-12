@@ -1,5 +1,8 @@
 # Brightness
 
+[![CI](https://github.com/joaodrp/omarchy-auto-brightness/actions/workflows/ci.yml/badge.svg)](https://github.com/joaodrp/omarchy-auto-brightness/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Ambient-light auto brightness for Omarchy, as a bar widget: a brightness
 slider and an **Auto** mode that follows the room. The stock Display panel
 is left as it is.
@@ -7,6 +10,8 @@ is left as it is.
 For now it supports the Apple Studio Display only, because that is the
 display it is developed and tested on. The controller is written so other
 displays and laptop panels can be added; see [Other displays](#other-displays).
+
+<img src="preview.png" alt="The panel open under the bar: the Auto chip, the room's lux, and the brightness slider" width="500">
 
 - Shows in the bar only while a supported display with a light sensor is
   connected. The icon changes with the mode.
@@ -31,10 +36,10 @@ displays and laptop panels can be added; see [Other displays](#other-displays).
 
 Inline on the plugin's entry in `~/.config/omarchy/shell.json`:
 
-| Key      | Default | Meaning                                              |
-|----------|---------|------------------------------------------------------|
-| `auto`   | `true`  | Auto brightness on. The switch persists here.        |
-| `offset` | `0`     | Shift the whole curve by N points. Calibration knob. |
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `auto` | `true` | Auto brightness on. The chip persists here. |
+| `offset` | `0` | Shift the whole curve by N points. Calibration knob. |
 
 IPC, for keybindings or scripts:
 

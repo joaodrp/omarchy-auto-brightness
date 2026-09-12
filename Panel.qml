@@ -44,13 +44,6 @@ Panel {
 
   function setAuto(on) { if (service) service.setEnabled(on) }
 
-  function autoDetail() {
-    if (!autoEnabled || !service) return ""
-    var learned = service.learned
-    if (learned) return "Learned " + (learned > 0 ? "+" : "") + learned + " at " + Math.round(service.lux) + " lux"
-    return Math.round(service.lux) + " lux"
-  }
-
   function chipText() {
     if (!autoEnabled) return "Manual"
     var learned = service ? service.learned : 0
@@ -212,7 +205,7 @@ Panel {
             Button {
               id: autoChip
               text: root.chipText()
-              tooltipText: root.autoDetail() || "Follow the room's light"
+              tooltipText: root.autoEnabled ? "Switch to manual" : "Follow the room's light"
               selected: root.autoEnabled
               bordered: true
               foreground: root.bar.foreground
