@@ -190,115 +190,53 @@ Panel {
         width: parent.width
         spacing: Style.space(14)
 
-        // ---------- Hero ----------
-        Item {
+        PanelHero {
           width: parent.width
-          implicitHeight: Math.max(heroIcon.implicitHeight, heroLabels.implicitHeight)
-
-          Text {
-            id: heroIcon
-            text: "󰍹"
-            color: root.bar.foreground
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.display
-            anchors.left: parent.left
-            anchors.verticalCenter: parent.verticalCenter
+          title: "Brightness"
+          meta: {
+            if (!root.service) return "Starting"
+            if (root.service.error) return root.service.error
+            return Math.round(root.service.lux) + " lux"
           }
-
-          Column {
-            id: heroLabels
-            anchors.left: heroIcon.right
-            anchors.leftMargin: Style.space(14)
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.space(2)
-
+          foreground: root.bar.foreground
+          fontFamily: root.bar.fontFamily
+          iconComponent: Component {
             Text {
-              text: "Brightness"
+              text: root.autoEnabled ? "󰃟" : "󰃠"
               color: root.bar.foreground
               font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.title
-              font.bold: true
-              elide: Text.ElideRight
-              width: parent.width
-            }
-
-            Text {
-              text: {
-                if (!root.service) return "STARTING"
-                if (root.service.error) return root.service.error.toUpperCase()
-                var lux = Math.round(root.service.lux)
-                return root.autoEnabled ? lux + " LUX · FOLLOWING THE ROOM" : lux + " LUX · MANUAL"
-              }
-              color: Qt.darker(root.bar.foreground, 1.4)
-              font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.caption
-              font.bold: true
-              font.letterSpacing: 1.2
-              elide: Text.ElideRight
-              width: parent.width
+              font.pixelSize: Style.font.display
             }
           }
-        }
-
-        // ---------- Brightness ----------
-        PanelSeparator { foreground: root.bar.foreground }
-
-        Column {
-          width: parent.width
-          spacing: Style.space(6)
-
-          Item {
-            width: parent.width
-            implicitHeight: Math.max(brightnessHeader.implicitHeight, brightnessPercent.implicitHeight, autoChip.implicitHeight)
-
-            PanelSectionHeader {
-              id: brightnessHeader
-              text: "BRIGHTNESS"
-              foreground: root.bar.foreground
-              fontFamily: root.bar.fontFamily
-              anchors.left: parent.left
-              anchors.verticalCenter: parent.verticalCenter
-            }
-
+          trailingControl: Component {
             Button {
               id: autoChip
               text: root.chipText()
               tooltipText: root.autoDetail() || "Follow the room's light"
               selected: root.autoEnabled
               bordered: true
-              fontSize: Style.font.caption
-              horizontalPadding: Style.space(8)
-              verticalPadding: Style.space(2)
               foreground: root.bar.foreground
               fontFamily: root.bar.fontFamily
               hasCursor: root.cursorActive && root.selectedIndex === 0
-              anchors.left: brightnessHeader.right
-              anchors.leftMargin: Style.space(10)
-              anchors.verticalCenter: parent.verticalCenter
-              anchors.verticalCenterOffset: brightnessHeader.topPadding / 2
               onHovered: function(on) {
                 if (on) { root.cursorActive = true; root.selectedIndex = 0 }
               }
               onClicked: root.setAuto(!root.autoEnabled)
             }
-
-            Text {
-              id: brightnessPercent
-              text: Math.round(brightnessSlider.dragging ? brightnessSlider.liveValue : root.brightnessPercent) + "%"
-              color: Qt.darker(root.bar.foreground, 1.4)
-              font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.caption
-              font.bold: true
-              anchors.right: parent.right
-              anchors.rightMargin: Style.space(6)
-              anchors.baseline: brightnessHeader.baseline
-            }
           }
+        }
+
+        PanelSeparator { foreground: root.bar.foreground }
+
+        Item {
+          width: parent.width
+          implicitHeight: brightnessRow.height
 
           CursorSurface {
             id: brightnessRow
-            width: parent.width
+            anchors.left: parent.left
+            anchors.right: brightnessPercent.left
+            anchors.rightMargin: Style.space(12)
             height: brightnessSlider.implicitHeight + Style.spacing.controlGap
             hasCursor: root.cursorActive && root.selectedIndex === -1
             foreground: root.bar.foreground
@@ -325,6 +263,18 @@ Panel {
             HoverHandler {
               onHoveredChanged: if (hovered) { root.cursorActive = true; root.selectedIndex = -1 }
             }
+          }
+
+          Text {
+            id: brightnessPercent
+            text: Math.round(brightnessSlider.dragging ? brightnessSlider.liveValue : root.brightnessPercent) + "%"
+            width: implicitWidth < Style.space(36) ? Style.space(36) : implicitWidth
+            horizontalAlignment: Text.AlignRight
+            color: Qt.darker(root.bar.foreground, 1.4)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.body
+            anchors.right: parent.right
+            anchors.verticalCenter: brightnessRow.verticalCenter
           }
         }
       }
