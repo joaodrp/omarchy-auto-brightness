@@ -1,18 +1,19 @@
 # Studio Display
 
-Omarchy's Display panel with an **Auto** switch next to the brightness slider,
-driven by the Apple Studio Display's own ambient light sensor.
+A bar widget for the Apple Studio Display: a brightness slider and an
+**Auto** mode driven by the display's own ambient light sensor. The stock
+Display panel is left as it is.
 
-- Same panel as stock Omarchy: brightness, text size, scale, monitors. This
-  plugin replaces `omarchy.monitor` in the bar and keeps its IPC target.
+- Shows in the bar only while an Apple display with a light sensor is
+  connected. The icon changes with the mode.
 - Auto follows the room the way macOS and Android do: smoothed lux,
   asymmetric hysteresis and debounce, a log-shaped curve, then a ramp.
   Brightening is quick, dimming is slow.
 - Auto learns. Move the slider, the bar wheel, or the brightness hotkeys and
   the change is kept as an offset at the current light level, shown in the
   panel as `AUTO +8`. It fades after four hours or when the room changes a
-  lot. Flip the switch, or press Enter on the brightness row, to turn Auto
-  off entirely.
+  lot. Click the chip, or press Enter on it, to switch between Auto and
+  Manual.
 - The switch only shows when an Apple display and its light sensor are
   connected.
 
@@ -28,8 +29,8 @@ driven by the Apple Studio Display's own ambient light sensor.
 omarchy plugin add https://github.com/joaodrp/omarchy-studio-display.git --enable
 ```
 
-Enabling swaps the stock Display widget for this one, in the same bar slot,
-and disables `omarchy.monitor`. Disabling puts the stock widget back.
+The widget lands in the right section of the bar. Move it with
+`omarchy plugin enable io.github.joaodrp.studio-display --section left`.
 
 ## Settings
 
@@ -79,8 +80,7 @@ over stdin; hotkey changes are picked up by the next brightness read-back.
 |-----------------|----------------------------------------------------------------------|
 | `controller`    | Bash loop: the pipeline above, writing through `omarchy-brightness-display`. |
 | `Service.qml`   | Runs the controller, persists `auto`, forwards manual changes, exposes state to the panel and IPC. |
-| `Panel.qml`     | Upstream `omarchy.monitor` panel plus the switch. Generated, see below. |
-| `patch-panel.py`| The switch as anchored edits on top of the upstream panel.           |
+| `Panel.qml`     | The bar icon and panel: slider, Auto chip, lux readout.               |
 
 The loop structure started from
 [miharekar/omarchy-studio-display-auto-brightness](https://github.com/miharekar/omarchy-studio-display-auto-brightness),
@@ -88,19 +88,6 @@ which needs the XDR's two sensors. The hysteresis, debounce and learning
 follow the design Android documents in `AutomaticBrightnessController`.
 
 The evidence behind each stage is in [docs/design.md](docs/design.md).
-
-### Tracking upstream
-
-`Panel.qml` and `Model.js` are copies of Omarchy's Display panel. After an
-Omarchy update:
-
-```sh
-cp ~/.local/share/omarchy/shell/plugins/panels/monitor/{Panel.qml,Model.js} .
-./patch-panel.py
-```
-
-The script stops if an anchor no longer matches, so a changed upstream
-panel is never half-patched.
 
 ### Check
 
