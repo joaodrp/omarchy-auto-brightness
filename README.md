@@ -1,36 +1,31 @@
 # Brightness
 
-A bar widget for the Apple Studio Display: a brightness slider and an
-**Auto** mode driven by the display's own ambient light sensor. The stock
-Display panel is left as it is.
+Ambient-light auto brightness for Omarchy, as a bar widget: a brightness
+slider and an **Auto** mode that follows the room. The stock Display panel
+is left as it is.
 
-- Shows in the bar only while an Apple display with a light sensor is
+For now it supports the Apple Studio Display only, because that is the
+display it is developed and tested on. The controller is written so other
+displays and laptop panels can be added; see [Other displays](#other-displays).
+
+- Shows in the bar only while a supported display with a light sensor is
   connected. The icon changes with the mode.
 - Auto follows the room the way macOS and Android do: smoothed lux,
   asymmetric hysteresis and debounce, a log-shaped curve, then a ramp.
   Brightening is quick, dimming is slow.
 - Auto learns. Move the slider, the bar wheel, or the brightness hotkeys and
-  the change is kept as an offset at the current light level, shown in the
-  panel as `AUTO +8`. It fades after four hours or when the room changes a
+  the change is kept as an offset at the current light level, shown on the
+  chip as `Auto +8`. It fades after four hours or when the room changes a
   lot. Click the chip, or press Enter on it, to switch between Auto and
   Manual.
-- The switch only shows when an Apple display and its light sensor are
-  connected.
 
 ## Requirements
 
-- An Apple display that Hyprland reports with make `Apple Computer Inc`.
-  Tested on the 27" Studio Display; the XDR exposes the same interfaces.
+- An Apple Studio Display, connected so that its USB side is up: Hyprland
+  reports make `Apple Computer Inc`, and the display's light sensor appears
+  under `/sys/bus/iio`. The Pro Display XDR exposes the same interfaces but
+  is untested.
 - `asdcontrol` and the passwordless sudo rule for it. Omarchy installs both.
-
-## Install
-
-```sh
-omarchy plugin add https://github.com/joaodrp/omarchy-auto-brightness.git --enable
-```
-
-The widget lands in the right section of the bar. Move it with
-`omarchy plugin enable io.github.joaodrp.auto-brightness --section left`.
 
 ## Settings
 
@@ -94,6 +89,25 @@ The evidence behind each stage is in [docs/design.md](docs/design.md).
 ```sh
 ./controller --self-test
 ```
+
+## Other displays
+
+Three places pin the plugin to the Studio Display, and each is a small
+change:
+
+| What | Today | To generalise |
+|------|-------|---------------|
+| Display detection | Hyprland output whose make contains `Apple` | Accept the internal panel, or any output `omarchy-brightness-display` can drive |
+| Sensor discovery | IIO `als` device under the Apple USB path | Any IIO illuminance device, preferring one attached to the display |
+| Lux unit | Fixed 0.001, because the Apple sensor reports millilux while the kernel scale reads 1.0 | Per-sensor: Apple gets 0.001, everything else the kernel's `in_illuminance_scale` |
+
+The curve is anchored in nits, so a laptop panel needs its own anchors but
+not a new structure. Hysteresis, debounce, ramp and learning carry over
+unchanged. Contributions with a display to test on are welcome; the
+Framework Laptop 13 is the obvious first candidate.
+
+Omarchy has open pull requests for built-in auto brightness. If one lands,
+this plugin will shrink to whatever the built-in version does not cover.
 
 ## Known limits
 
