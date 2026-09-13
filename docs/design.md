@@ -122,11 +122,14 @@ is invisible. Step-detection thresholds sit around 6 to 30% Weber
 contrast depending on adaptation, and luminance transients make changes
 more detectable, not less (blocking the transient cut detection by about
 30% in one study). The engineering target for an invisible fade is a per
-update change of 1 to 2%, which this display cannot deliver: its steps
-are about 5%. On coarse hardware the ramp only decides whether the hops
-arrive every 0.4 s and read as one fade, or every 2 s and read as
-separate events. The earlier exponential ramp spread a 40-point dim over
-15 s, one hop every 2 s.
+update change of 1 to 2%. A write to this display takes about 80 ms, so
+each poll's move is written as a run of one-point steps when dimming and
+two-point steps when brightening, one write per 80 ms; the fade is then
+as fine as the panel can show. The `asdcontrol` README reports about 20
+visible backlight levels on 2022 firmware; the firmware accepts every
+percent (raw values 596 apart), and whether each is visible has not been
+measured. The earlier exponential ramp spread a 40-point dim over 15 s,
+one hop every 2 s.
 
 ### 6. Learning from manual changes
 
@@ -167,8 +170,11 @@ no justification and was removed.
 
 - The nits mapping assumes Apple's 600 nit rating is the raw maximum. A
   light meter reading at two percentages would settle it.
-- The curve anchors between 200 and 5000 lux have not been lived with;
-  the room this was built in never exceeds about 100 lux.
+- The curve anchors between 200 and 5000 lux have not been lived with
+  for long; the room this was built in reads about 10 lux at night and
+  1600 lux in daylight.
+- Whether one-point backlight steps are visible on this panel. If not,
+  the dim step could be two points at no cost.
 - Whether a per-lux correction, as Android and Plasma keep, would beat a
   single offset once someone lives with it across a full day of light.
 

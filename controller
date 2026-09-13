@@ -39,6 +39,12 @@ brighten_rate=20
 brighten_cap=2
 dim_rate=13
 dim_cap=3
+# Each poll's move is written as a run of small steps, one every write
+# (about 80 ms), so the fade is as fine as the display can show: two points
+# at a time up, where speed is what matters, one point down, where the eye
+# is watching for the change.
+brighten_step=2
+dim_step=1
 
 # Lux anchors -> brightness percent, interpolated in log2(lux). One percent is
 # about 6 nits on this display (raw 400..60000 spans roughly 4..600 nits), so
@@ -252,6 +258,19 @@ write_display() {
   last_applied=$1
 }
 
+# Walk from where the display is to the target in small steps.
+write_ramp() {
+  local to="$1" step from
+  from=$last_applied
+  if (( from == 0 )); then write_display "$to"; return; fi
+  step=$(( to > from ? brighten_step : -dim_step ))
+  while (( (step > 0 && from + step < to) || (step < 0 && from + step > to) )); do
+    from=$(( from + step ))
+    write_display "$from" || return 1
+  done
+  write_display "$to"
+}
+
 emit_status() {
   local available="$1" error="$2" p=false
   (( paused )) && p=true
@@ -334,11 +353,13 @@ poll() {
       fi
     fi
     skip_readback=0
-    if ! write_display "$desired"; then
+    if ! write_ramp "$desired"; then
       emit_status true "Brightness command failed"
       reset_state
       return
     fi
+    # The steps took most of the poll already.
+    next_delay=0.05
   fi
 
   emit_status true ""

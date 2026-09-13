@@ -112,8 +112,9 @@ They describe the current state, never the change; git history holds that.
   drop half the user's presses.
 - **A zero-timeout `read` in bash consumes nothing.** `read -t 0` only
   reports that input is waiting; draining with it spins at 100% CPU.
-- **The display has about 20 visible brightness steps.** A slower ramp does
-  not look smoother, it looks like separate hops.
+- **A write takes about 80 ms**, so a ramp can afford one-point steps. The
+  `asdcontrol` README claims only about 20 visible backlight levels; the
+  firmware accepts every percent, and whether each is visible is untested.
 - **Icon glyphs lie.** Verify any new Nerd Font codepoint by rendering it
   before shipping; a guessed codepoint here drew a barrel.
 - **Reload is a restart.** Never `omarchy-refresh-shell`: that resets the
