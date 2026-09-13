@@ -7,7 +7,7 @@ Ambient-light auto brightness for Omarchy, as a bar widget. Apple Studio
 Display only for now, because that is what it is tested on; see
 [Other displays](#other-displays).
 
-<img src="preview.png" alt="The panel open under the bar: the Auto chip, the room's lux, and the brightness slider" width="500">
+<img src="docs/demo.gif" alt="The panel open under the bar: a nudge on the slider becomes Auto +6, a jump becomes Auto -35, restore ramps back to the curve, and the chip switches to Manual and back" width="460">
 
 - Appears in the bar only while a supported display is connected.
 - Auto follows the room the way macOS and Android do: smoothed lux,
@@ -16,8 +16,6 @@ Display only for now, because that is what it is tested on; see
 - Auto learns. Any manual change, slider, wheel or hotkey, becomes your
   offset from the curve, shown on the chip as `Auto +8` and kept until you
   press the restore button beside it.
-
-<img src="docs/images/learned.png" alt="The panel after a manual change: the chip reads Auto +18 and a restore button sits beside it" width="500">
 
 ## Requirements
 

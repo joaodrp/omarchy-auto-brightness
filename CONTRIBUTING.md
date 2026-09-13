@@ -15,7 +15,8 @@ model, how it is connected, what `hyprctl monitors -j` reports for `make` and
 | `Service.qml` | Runs the controller, persists settings, forwards manual changes, IPC |
 | `Panel.qml` | The bar icon and the panel |
 | `docs/design.md` | Why each stage of the controller is the way it is, with sources |
-| `preview.png` | The README hero, and the listing image the [plugin marketplace](https://plugins.omarchy.org/publish.html) reads from the repository root |
+| `preview.png` | The listing image the [plugin marketplace](https://plugins.omarchy.org/publish.html) reads from the repository root |
+| `docs/demo.gif`, `docs/demo.mp4` | The README hero and the shareable clip; see [Screenshots](#screenshots) |
 | `ROLLBACK.md` | Everything the plugin touches on a machine, and how to undo it |
 | `.github/`, `release-please-config.json`, `.release-please-manifest.json` | CI with its manifest check, and the release automation; see [Releases](#releases) |
 
@@ -83,6 +84,16 @@ omarchy-shell io.github.joaodrp.auto-brightness open
 grim -o DP-3 shot.png
 omarchy-shell io.github.joaodrp.auto-brightness close
 magick shot.png -gravity NorthEast -crop 1000x330+0+0 +repage preview.png
+```
+
+The demo clip is recorded the same way, with `wlrctl pointer move` and
+`click` driving the panel (positions are in logical pixels; move to a far
+negative corner first, then to the target) and `gpu-screen-recorder -w
+region` capturing a frame with equal margins around the panel:
+
+```sh
+gpu-screen-recorder -w region -region 460x200+2071+0 -f 30 -c mp4 -cursor yes -o demo.mp4
+ffmpeg -i demo.mp4 -vf "fps=15,scale=690:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" demo.gif
 ```
 
 ## Conventions
