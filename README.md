@@ -59,7 +59,7 @@ Every half second the controller reads the display's light sensor and:
 | Smooth | Exponential average, settles in about 2 s. |
 | Accept | Only a change of +10% or -20%, held for 4 s or 8 s. |
 | Map | Lux to brightness, log-shaped: 5% in the dark, 24% at 100 lux, 100% at 5000. Plus `offset`. |
-| Ramp | 20 points per second up, 13 down, capped at 2 s and 3 s, written two points at a time up and one point at a time down, one write every 80 ms. |
+| Ramp | 20 points per second up, 13 down, capped at 2 s and 3 s, written one step per display write. The step is what the rate covers in one write's time, so the fade is as fine as the display allows. |
 
 The evidence for each stage is in [docs/design.md](docs/design.md). The
 loop structure started from
@@ -79,7 +79,8 @@ change:
 
 The curve is anchored in nits, so another panel needs its own anchors but
 not a new structure. Hysteresis, debounce, ramp and learning carry over
-unchanged. Contributions with a display to test on are welcome.
+unchanged; the ramp measures the display's write latency and steps as
+finely as that allows. Contributions with a display to test on are welcome.
 
 Omarchy has open pull requests for built-in auto brightness. If one lands,
 this plugin will shrink to whatever the built-in version does not cover.

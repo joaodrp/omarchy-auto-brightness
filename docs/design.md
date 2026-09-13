@@ -14,6 +14,19 @@ learn rather than a reason to stop. No published system uses a fixed
 lux-to-percent table from another display, and none turns auto off when
 the user touches the keys.
 
+## Principles
+
+- **Transitions are as smooth as the hardware allows.** The step is the
+  smallest the display can take in the time one write costs, and the
+  number of writes is whatever the rate then requires. Nothing about the
+  fade is a per-display constant; the controller measures its own write
+  latency and derives the step from it, so a faster display gets finer
+  steps for free and a slower link gets coarser ones without stalling.
+- **The user's hand always wins.** A manual change is adopted, never
+  fought, and becomes the standing correction.
+- **Stability comes from hysteresis and debounce, not from a slow ramp.**
+  The ramp only hides the transition.
+
 ## Measured on the hardware
 
 Apple Studio Display, 27", firmware as of September 2026, on Omarchy
@@ -123,9 +136,10 @@ contrast depending on adaptation, and luminance transients make changes
 more detectable, not less (blocking the transient cut detection by about
 30% in one study). The engineering target for an invisible fade is a per
 update change of 1 to 2%. A write to this display takes about 80 ms, so
-each poll's move is written as a run of one-point steps when dimming and
-two-point steps when brightening, one write per 80 ms; the fade is then
-as fine as the panel can show. The `asdcontrol` README reports about 20
+each poll's move is written as a run of steps, one per write: the step is
+what the rate covers in one write's time, which here is two points
+brightening and one dimming; the fade is then as fine as the panel can
+show, and the rule carries to any display without a new constant. The `asdcontrol` README reports about 20
 visible backlight levels on 2022 firmware; the firmware accepts every
 percent (raw values 596 apart), and whether each is visible has not been
 measured. The earlier exponential ramp spread a 40-point dim over 15 s,

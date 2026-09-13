@@ -39,12 +39,12 @@ brighten_rate=20
 brighten_cap=2
 dim_rate=13
 dim_cap=3
-# Each poll's move is written as a run of small steps, one every write
-# (about 80 ms), so the fade is as fine as the display can show: two points
-# at a time up, where speed is what matters, one point down, where the eye
-# is watching for the change.
-brighten_step=2
-dim_step=1
+# Transitions are as smooth as the hardware allows. Each poll's move is
+# written as a run of steps, back to back; a step is whatever the rate covers
+# in one write's time, never less than one point. So the step follows the
+# measured write latency (about 80 ms on this display) and needs no constant
+# of its own.
+write_seconds=0.1  # first estimate; measured from the first write on
 
 # Lux anchors -> brightness percent, interpolated in log2(lux). One percent is
 # about 6 nits on this display (raw 400..60000 spans roughly 4..600 nits), so
@@ -146,6 +146,11 @@ learn_manual() {
   ramp_target=""
 }
 
+# Points per write for a rate: what the rate covers in one write, at least 1.
+step_for() {
+  awk -v rate="$1" -v w="$write_seconds" 'BEGIN { s = int(rate * w + 0.5); print s < 1 ? 1 : s }'
+}
+
 if [[ ${1:-} == --self-test ]]; then
   fail() { echo "self-test: $*" >&2; exit 1; }
   run() {
@@ -197,6 +202,11 @@ if [[ ${1:-} == --self-test ]]; then
   (( offset == 16 && brightness == 30 )) || fail "manual 30 over curve 14 gave offset $offset"
   paused=1; offset=0; learn_manual 40
   (( offset == 0 && brightness == 40 )) || fail "manual while paused changed the offset to $offset"
+  # Step per write follows the write latency: 80 ms gives 2 up and 1 down,
+  # a 10 ms panel gives 1 both ways, a slow 300 ms link gives 6 and 4.
+  write_seconds=0.08; [[ $(step_for 20) == 2 && $(step_for 13) == 1 ]] || fail "80 ms steps: $(step_for 20) $(step_for 13)"
+  write_seconds=0.01; [[ $(step_for 20) == 1 && $(step_for 13) == 1 ]] || fail "10 ms steps should floor at 1"
+  write_seconds=0.3;  [[ $(step_for 20) == 6 && $(step_for 13) == 4 ]] || fail "300 ms steps: $(step_for 20) $(step_for 13)"
   echo ok
   exit 0
 fi
@@ -254,16 +264,18 @@ sync_from_display() {
 # presses. Without the lock both writes reach the display, and the read-back
 # before the next write adopts whichever landed last.
 write_display() {
+  local started=$EPOCHREALTIME
   timeout 10 omarchy-brightness-display-apple --no-osd "$1%" >/dev/null 2>&1 || return 1
   last_applied=$1
+  write_seconds=$(awk -v a="$started" -v b="$EPOCHREALTIME" -v w="$write_seconds" 'BEGIN { printf "%.4f", w + 0.3 * ((b - a) - w) }')
 }
 
-# Walk from where the display is to the target in small steps.
+# Walk from where the display is to the target, one write per step.
 write_ramp() {
   local to="$1" step from
   from=$last_applied
   if (( from == 0 )); then write_display "$to"; return; fi
-  step=$(( to > from ? brighten_step : -dim_step ))
+  if (( to > from )); then step=$(step_for "$brighten_rate"); else step=-$(step_for "$dim_rate"); fi
   while (( (step > 0 && from + step < to) || (step < 0 && from + step > to) )); do
     from=$(( from + step ))
     write_display "$from" || return 1
