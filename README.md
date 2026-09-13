@@ -7,7 +7,7 @@ Auto brightness for Omarchy: a bar widget that reads an ambient light
 sensor and follows the room. Tuned on the Apple Studio Display, and built
 to take other displays; see [Other displays](#other-displays).
 
-<img src="docs/demo.gif" alt="The panel open under the bar: a nudge on the slider becomes Auto +6, a jump becomes Auto -35, restore ramps back to the curve, and the chip switches to Manual and back" width="460">
+<img src="docs/demo.gif" alt="The panel open under the bar: a nudge on the slider becomes Auto +6, a jump becomes Auto -35, restore ramps back to the curve, and the chip switches to Manual and back" width="422">
 
 - Appears in the bar only while a supported display is connected.
 - Auto follows the room the way macOS and Android do: smoothed lux,

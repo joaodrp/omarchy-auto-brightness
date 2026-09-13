@@ -92,8 +92,8 @@ negative corner first, then to the target) and `gpu-screen-recorder -w
 region` capturing a frame with equal margins around the panel:
 
 ```sh
-gpu-screen-recorder -w region -region 460x200+2071+0 -f 30 -c mp4 -cursor yes -o demo.mp4
-ffmpeg -i demo.mp4 -vf "fps=15,scale=690:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" demo.gif
+gpu-screen-recorder -w region -region 422x176+2086+0 -f 30 -c mp4 -cursor yes -o demo.mp4
+ffmpeg -i demo.mp4 -vf "fps=15,scale=633:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" demo.gif
 ```
 
 ## Conventions
