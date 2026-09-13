@@ -90,7 +90,8 @@ magick shot.png -gravity NorthEast -crop 1000x330+0+0 +repage preview.png
 Native to Omarchy first. Before inventing a component, look for the built-in
 that solves it in `$OMARCHY_PATH/shell/Ui/` or in a first-party panel under
 `$OMARCHY_PATH/shell/plugins/`. Brightness goes through
-`omarchy-brightness-display`, never straight to `asdcontrol`.
+`omarchy-brightness-display` for reads and `omarchy-brightness-display-apple`
+for writes, never straight to `asdcontrol`.
 
 Comments carry what the code cannot: why an obvious alternative was rejected.
 They describe the current state, never the change; git history holds that.
@@ -104,6 +105,13 @@ They describe the current state, never the change; git history holds that.
   `in_illuminance_scale` reads 1.0. Do not trust the scale file for it.
 - **Every brightness read-back is a `sudo asdcontrol` call** and lands in
   the journal. Poll sparingly.
+- **`omarchy-brightness-display` drops a colliding call and exits 0.** It
+  holds a non-blocking lock against key repeat. Reads go through it, so a
+  read during a hotkey press simply fails and the poll skips its write;
+  writes go to `omarchy-brightness-display-apple` directly, or a ramp would
+  drop half the user's presses.
+- **A zero-timeout `read` in bash consumes nothing.** `read -t 0` only
+  reports that input is waiting; draining with it spins at 100% CPU.
 - **The display has about 20 visible brightness steps.** A slower ramp does
   not look smoother, it looks like separate hops.
 - **Icon glyphs lie.** Verify any new Nerd Font codepoint by rendering it

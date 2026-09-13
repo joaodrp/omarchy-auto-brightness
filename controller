@@ -242,8 +242,13 @@ sync_from_display() {
   return 1
 }
 
+# Writes go through the Apple script directly. The routing helper holds a
+# non-blocking lock and silently drops a write that collides with a hotkey,
+# in either direction: a ramp would lose its own steps, or drop the user's
+# presses. Without the lock both writes reach the display, and the read-back
+# before the next write adopts whichever landed last.
 write_display() {
-  timeout 10 omarchy-brightness-display --no-osd --monitor "$monitor" "$1%" >/dev/null 2>&1 || return 1
+  timeout 10 omarchy-brightness-display-apple --no-osd "$1%" >/dev/null 2>&1 || return 1
   last_applied=$1
 }
 
@@ -273,7 +278,10 @@ handle_command() {
   case "$1" in
     auto)
       if [[ $2 == on ]]; then paused=0; else paused=1; fi
-      ramp_target=""
+      # Start from wherever the display is now; a value set while Auto was
+      # off is not a correction to the curve.
+      brightness=""
+      last_applied=0
       ;;
     offset) [[ $2 =~ ^-?[0-9]+$ ]] && { offset=$2; ramp_target=""; } ;;
     manual) learn_manual "$2" && skip_readback=1 ;;
@@ -346,7 +354,7 @@ while true; do
   # The wait doubles as the command reader; EOF means the service is gone.
   if read -t "$next_delay" -r command argument; then
     handle_command "$command" "${argument:-}"
-    while read -t 0 -r command argument; do handle_command "$command" "${argument:-}"; done
+    while read -t 0.01 -r command argument; do handle_command "$command" "${argument:-}"; done
   elif (( $? <= 128 )); then
     exit 0
   fi

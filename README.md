@@ -67,12 +67,13 @@ loop structure started from
 
 ## Other displays
 
-Three places pin the plugin to the Studio Display, and each is a small
+Four places pin the plugin to the Studio Display, and each is a small
 change:
 
 | What | Today | To generalise |
 |------|-------|---------------|
-| Display detection | Hyprland output whose make contains `Apple` | Accept the internal panel, or any output `omarchy-brightness-display` can drive |
+| Display detection | The Apple test `omarchy-brightness-display` routes on | Accept the internal panel, or any output the helper can drive |
+| Writes | `omarchy-brightness-display-apple` directly, to sidestep the routing helper's lock | Route by display type, as reads already do |
 | Sensor discovery | IIO `als` device under the Apple USB path | Any IIO illuminance device, preferring one attached to the display |
 | Lux unit | Fixed 0.001, because the Apple sensor reports millilux while the kernel scale reads 1.0 | Per-sensor: Apple gets 0.001, everything else the kernel's `in_illuminance_scale` |
 
