@@ -3,9 +3,9 @@
 [![CI](https://github.com/joaodrp/omarchy-auto-brightness/actions/workflows/ci.yml/badge.svg)](https://github.com/joaodrp/omarchy-auto-brightness/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Ambient-light auto brightness for Omarchy, as a bar widget. Apple Studio
-Display only for now, because that is what it is tested on; see
-[Other displays](#other-displays).
+Auto brightness for Omarchy: a bar widget that reads an ambient light
+sensor and follows the room. Tuned on the Apple Studio Display, and built
+to take other displays; see [Other displays](#other-displays).
 
 <img src="docs/demo.gif" alt="The panel open under the bar: a nudge on the slider becomes Auto +6, a jump becomes Auto -35, restore ramps back to the curve, and the chip switches to Manual and back" width="460">
 
@@ -79,7 +79,9 @@ change:
 The curve is anchored in nits, so another panel needs its own anchors but
 not a new structure. Hysteresis, debounce, ramp and learning carry over
 unchanged; the ramp measures the display's write latency and steps as
-finely as that allows. Contributions with a display to test on are welcome.
+finely as that allows. Got a display with a light sensor? Open a PR, or
+an issue with what it exposes under `/sys/bus/iio` and in
+`hyprctl monitors -j`.
 
 Omarchy has open pull requests for built-in auto brightness. If one lands,
 this plugin will shrink to whatever the built-in version does not cover.
