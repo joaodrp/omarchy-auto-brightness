@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.1](https://github.com/joaodrp/omarchy-auto-brightness/compare/v0.1.0...v0.1.1) (2026-09-13)
+
+
+### Features
+
+* a manual change lands in one write ([d74dd32](https://github.com/joaodrp/omarchy-auto-brightness/commit/d74dd3200262c11a66f3cb5d0e2ab9e97ec17625))
+* derive the ramp step from the measured write latency ([f176a59](https://github.com/joaodrp/omarchy-auto-brightness/commit/f176a59c4ffb812a45ed61574c6e5e023ecd28dc))
+* write each ramp move as one- and two-point steps ([5f65317](https://github.com/joaodrp/omarchy-auto-brightness/commit/5f653172a31541e732796c4e7f0e3b6b0b25293d))
+
+
+### Bug Fixes
+
+* drain stdin without spinning, adopt the display when Auto turns on, write past the helper's lock ([c86bec8](https://github.com/joaodrp/omarchy-auto-brightness/commit/c86bec8ced8346121a5d8c8950b7ab88ef7cfa31))
+* honour the ramp cap, never overwrite a hotkey, and nine more review findings ([7547316](https://github.com/joaodrp/omarchy-auto-brightness/commit/75473168168db20f8a0b4e276fc738f94f494689))
+
 ## 0.1.0 (2026-09-12)
 
 
