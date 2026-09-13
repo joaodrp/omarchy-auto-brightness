@@ -139,6 +139,7 @@ Item {
     function disable(): string { root.setEnabled(false); return "disabled" }
     function toggle(): string { root.setEnabled(!root.enabled); return root.enabled ? "disabled" : "enabled" }
     function forget(): string { root.clearOffset(); return "forgot" }
+    function set(percent: string): string { root.setBrightness(percent); return "set " + Math.round(Number(percent)) }
   }
 
   Component.onDestruction: {

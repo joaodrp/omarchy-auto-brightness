@@ -48,6 +48,7 @@ IPC:
 omarchy-shell auto-brightness status
 omarchy-shell auto-brightness toggle   # also enable / disable
 omarchy-shell auto-brightness forget   # clear the offset
+omarchy-shell auto-brightness set 40   # as if you moved the slider
 ```
 
 ## How it works

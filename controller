@@ -315,7 +315,7 @@ handle_command() {
       last_applied=0
       ;;
     offset) [[ $2 =~ ^-?[0-9]+$ ]] && { offset=$2; ramp_target=""; } ;;
-    manual) learn_manual "$2" && skip_readback=1 ;;
+    manual) learn_manual "$2" && user_request=1 ;;  # written at once, next pass
   esac
 }
 
@@ -355,23 +355,23 @@ poll() {
   )"
 
   if (( desired != last_applied )); then
-    # Never overwrite a hotkey press: look first, unless we looked this poll or
-    # the value is the user's own request.
-    if (( ! read_this_poll && ! skip_readback )); then
-      sync_from_display
-      if (( $? != 0 )); then
-        emit_status true ""
-        return
+    if (( user_request )); then
+      # The user's hand lands at once; only the room is ramped.
+      user_request=0
+      write_display "$desired" || { emit_status true "Brightness command failed"; reset_state; return; }
+    else
+      # Never overwrite a hotkey press: look first, unless we looked this poll.
+      if (( ! read_this_poll )); then
+        sync_from_display
+        if (( $? != 0 )); then
+          emit_status true ""
+          return
+        fi
       fi
+      write_ramp "$desired" || { emit_status true "Brightness command failed"; reset_state; return; }
+      # The steps took most of the poll already.
+      next_delay=0.05
     fi
-    skip_readback=0
-    if ! write_ramp "$desired"; then
-      emit_status true "Brightness command failed"
-      reset_state
-      return
-    fi
-    # The steps took most of the poll already.
-    next_delay=0.05
   fi
 
   emit_status true ""
@@ -379,7 +379,7 @@ poll() {
 
 trap 'exit 0' TERM INT
 
-skip_readback=0
+user_request=0
 reset_state
 
 while true; do

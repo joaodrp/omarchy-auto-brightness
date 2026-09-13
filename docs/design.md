@@ -22,8 +22,9 @@ the user touches the keys.
   fade is a per-display constant; the controller measures its own write
   latency and derives the step from it, so a faster display gets finer
   steps for free and a slower link gets coarser ones without stalling.
-- **The user's hand always wins.** A manual change is adopted, never
-  fought, and becomes the standing correction.
+- **The user's hand always wins, and lands at once.** A manual change is
+  written in one step, adopted, never fought, and becomes the standing
+  correction. Only the room's changes are ramped.
 - **Stability comes from hysteresis and debounce, not from a slow ramp.**
   The ramp only hides the transition.
 
