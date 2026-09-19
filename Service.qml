@@ -26,17 +26,13 @@ Item {
   property bool tearingDown: false
 
   function configEntry() {
-    var config = shell?.shellConfig
     var sections = ["left", "center", "right"]
-    var layout = config?.bar?.layout
+    var layout = shell?.barConfig?.layout
     for (var s = 0; layout && s < sections.length; s++) {
       var entries = layout[sections[s]] || []
       for (var i = 0; i < entries.length; i++)
         if (entries[i]?.id === manifest?.id) return entries[i]
     }
-    var plugins = config?.plugins || []
-    for (var p = 0; p < plugins.length; p++)
-      if (plugins[p]?.id === manifest?.id) return plugins[p]
     return ({})
   }
 
@@ -119,7 +115,7 @@ Item {
 
   Connections {
     target: root.shell
-    function onShellConfigChanged() { root.syncSettings() }
+    function onBarConfigChanged() { root.syncSettings() }
   }
 
   onShellChanged: syncSettings()
