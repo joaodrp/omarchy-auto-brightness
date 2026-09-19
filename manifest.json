@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.joaodrp.auto-brightness",
   "name": "Brightness",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": "João Pereira",
   "license": "MIT",
   "description": "Ambient-light auto brightness for the Apple Studio Display, from the Omarchy bar.",
