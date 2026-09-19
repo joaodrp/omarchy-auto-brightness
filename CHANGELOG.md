@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/joaodrp/omarchy-auto-brightness/compare/v0.1.1...v0.1.2) (2026-09-19)
+
+
+### Bug Fixes
+
+* restore the widget under omarchy 4.0.4 ([#5](https://github.com/joaodrp/omarchy-auto-brightness/issues/5)) ([cd34ce1](https://github.com/joaodrp/omarchy-auto-brightness/commit/cd34ce1fcf910915acd3c09e2e7c9c5536292767))
+
 ## [0.1.1](https://github.com/joaodrp/omarchy-auto-brightness/compare/v0.1.0...v0.1.1) (2026-09-13)
 
 
