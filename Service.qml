@@ -67,9 +67,14 @@ Item {
   // turns it into the offset, which comes back in its status.
   function setBrightness(percent) { send("manual " + Math.round(Number(percent))) }
 
+  // The host strips `__sourceDir` from third-party manifests, so the
+  // controller is found next to this file instead.
+  readonly property string controllerPath:
+    decodeURIComponent(String(Qt.resolvedUrl("controller")).replace(/^file:\/\//, ""))
+
   function startController() {
-    if (controller.running || !manifest?.__sourceDir) return
-    controller.command = ["setpriv", "--pdeathsig", "TERM", manifest.__sourceDir + "/controller"]
+    if (controller.running) return
+    controller.command = ["setpriv", "--pdeathsig", "TERM", controllerPath]
     controller.running = true
     syncSettings()
   }
