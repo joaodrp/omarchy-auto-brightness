@@ -16,6 +16,7 @@ model, how it is connected, what `hyprctl monitors -j` reports for `make` and
 | `Panel.qml` | The bar icon and the panel |
 | `docs/design.md` | Why each stage of the controller is the way it is, with sources |
 | `preview.png` | The listing image the [plugin marketplace](https://plugins.omarchy.org/publish.html) reads from the repository root |
+| `docs/preview.html`, `docs/panel.png` | The source of `preview.png` and the demo frame it insets; see [Screenshots](#screenshots) |
 | `docs/demo.gif`, `docs/demo.mp4` | The README hero and the shareable clip; see [Screenshots](#screenshots) |
 | `ROLLBACK.md` | Everything the plugin touches on a machine, and how to undo it |
 | `.github/`, `release-please-config.json`, `.release-please-manifest.json` | CI with its manifest check, and the release automation; see [Releases](#releases) |
@@ -83,7 +84,6 @@ hyprctl dispatch 'hl.dsp.focus({ workspace = "2" })'
 omarchy-shell io.github.joaodrp.auto-brightness open
 grim -o DP-3 shot.png
 omarchy-shell io.github.joaodrp.auto-brightness close
-magick shot.png -gravity NorthEast -crop 1000x330+0+0 +repage preview.png
 ```
 
 The demo clip is recorded the same way, with `wlrctl pointer move` and
@@ -94,6 +94,20 @@ region` capturing a frame with equal margins around the panel:
 ```sh
 gpu-screen-recorder -w region -region 422x176+2086+0 -f 30 -c mp4 -cursor yes -o demo.mp4
 ffmpeg -i demo.mp4 -vf "fps=15,scale=633:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" demo.gif
+```
+
+`preview.png` is `docs/preview.html` rendered at 1920x1080. The marketplace
+crops it to about 2:1 and shows it 505px wide with the plugin name printed
+underneath, so the page keeps everything that matters out of the top and
+bottom 60px and spends its headline on the pitch, not the name. It insets
+`docs/panel.png`, the frame of the demo clip where the chip reads `Auto +6`,
+cut to the panel's border by pixel position; after a new clip, re-extract
+the frame and check the cut still holds. The page is set in Nimbus Sans,
+from `gsfonts`.
+
+```sh
+ffmpeg -ss 8 -i docs/demo.mp4 -frames:v 1 docs/panel.png
+chromium --headless --hide-scrollbars --window-size=1920,1080 --screenshot=preview.png docs/preview.html
 ```
 
 ## Conventions
