@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Brightness listing card</title>
+<!-- Source of ../preview.png; CONTRIBUTING.md has the render command. The
+     marketplace crops the card to about 2:1 and shows it 505px wide, so
+     nothing that matters sits in the top or bottom 60px, and the headline
+     carries the pitch because the card prints the plugin name under it. -->
+<style>
+  :root{
+    --wall:#E3E8EA;
+    --ink:#1E242A;
+    --ink-2:#39434B;
+    --ink-soft:#414C55;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:1920px;height:1080px;overflow:hidden}
+  body{
+    background-color:var(--wall);
+    font-family:"Nimbus Sans",sans-serif;
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* --- daylight on a wall ------------------------------------------- */
+  .wall{position:absolute;inset:0;overflow:hidden}
+  .pool{
+    position:absolute;
+    left:30%;top:-46%;
+    width:86%;height:170%;
+    transform:rotate(-13deg);
+    background-image:radial-gradient(58% 52% at 50% 50%, rgba(255,251,240,1) 0%, rgba(255,249,236,.70) 46%, rgba(255,248,234,0) 76%);
+    filter:blur(34px);
+  }
+  .edge{
+    position:absolute;
+    left:6%;top:-30%;
+    width:34%;height:160%;
+    transform:rotate(-13deg);
+    filter:blur(58px);
+    background-image:linear-gradient(to right, rgba(148,166,179,.40) 0%, rgba(148,166,179,.13) 62%, rgba(148,166,179,0) 100%);
+  }
+  .sill{
+    position:absolute;
+    left:40%;top:70%;
+    width:80%;height:52%;
+    transform:rotate(-13deg);
+    filter:blur(46px);
+    background-image:linear-gradient(to bottom, rgba(140,158,172,0) 0%, rgba(140,158,172,.30) 60%, rgba(140,158,172,.34) 100%);
+  }
+  .shaft{
+    position:absolute;
+    left:34%;top:-56%;
+    width:30%;height:200%;
+    transform:rotate(-13deg);
+    filter:blur(30px);
+    background-image:linear-gradient(to right, rgba(255,249,235,0) 0%, rgba(255,251,241,.90) 22%, rgba(255,251,241,.94) 74%, rgba(255,249,235,0) 100%);
+  }
+  .grain{position:absolute;inset:0;opacity:.26;mix-blend-mode:multiply}
+  .vign{
+    position:absolute;inset:0;
+    background-image:radial-gradient(118% 92% at 52% 44%, rgba(0,0,0,0) 58%, rgba(58,72,84,.15) 100%);
+  }
+
+  /* --- composition --------------------------------------------------- */
+  .head{
+    position:absolute;left:126px;top:134px;
+    font-family:"Nimbus Sans Narrow",sans-serif;
+    font-weight:700;
+    font-size:152px;
+    line-height:.895;
+    letter-spacing:-.014em;
+    width:max-content;white-space:nowrap;
+  }
+  .head span{display:block}
+  .head .l2{color:var(--ink-2)}
+
+  .sig{position:absolute;left:130px;top:808px;width:max-content;white-space:nowrap}
+  .sig .name{
+    font-family:"JetBrainsMono Nerd Font","JetBrainsMono NF",monospace;
+    font-weight:700;font-size:66px;letter-spacing:-.025em;line-height:1;
+  }
+  .sig .sub{margin-top:20px;font-size:27px;line-height:1.35;color:var(--ink-soft)}
+
+  .caption{
+    position:absolute;right:114px;top:826px;
+    width:650px;
+    font-size:28px;line-height:1.48;color:var(--ink-soft);
+  }
+
+  /* panel.png: 844x352 frame of demo.mp4, panel border box x 40..799, y 62..313 */
+  .shot{
+    position:absolute;
+    right:110px;top:428px;
+    width:988px;height:328px;          /* 760 x 252 at 1.3 */
+    background-repeat:no-repeat;
+    background-image:url("panel.png");
+    background-size:1097.2px 457.6px;  /* 844 x 352 at 1.3 */
+    background-position:-52px -80.6px;
+    transform:rotate(-1.5deg);
+    box-shadow:
+      0 2px 5px rgba(34,46,56,.16),
+      0 22px 40px rgba(34,46,56,.20),
+      0 52px 92px rgba(34,46,56,.16);
+  }
+</style>
+</head>
+<body>
+  <div class="wall">
+    <div class="pool"></div>
+    <div class="shaft"></div>
+    <div class="edge"></div>
+    <div class="sill"></div>
+    <svg class="grain" xmlns="http://www.w3.org/2000/svg" width="1920" height="1080">
+      <filter id="g"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" stitchTiles="stitch"/>
+        <feColorMatrix type="saturate" values="0"/>
+        <feComponentTransfer><feFuncA type="linear" slope="0.5" intercept="0.5"/></feComponentTransfer></filter>
+      <rect width="1920" height="1080" filter="url(#g)"/>
+    </svg>
+    <div class="vign"></div>
+  </div>
+
+  <h1 class="head"><span>Correct it once.</span><span class="l2">It stays corrected.</span></h1>
+
+  <div class="shot"></div>
+
+  <p class="caption">Auto follows the light in the room. Your nudge of the slider becomes an offset it keeps at every light level, until you press restore.</p>
+
+  <div class="sig">
+    <div class="name">Brightness</div>
+    <div class="sub">Ambient light for the Apple Studio Display, on Omarchy.</div>
+  </div>
+</body>
+</html>
