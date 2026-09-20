@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/joaodrp/omarchy-auto-brightness/compare/v0.1.2...v0.1.3) (2026-09-20)
+
+
+### Miscellaneous Chores
+
+* release 0.1.3 ([#8](https://github.com/joaodrp/omarchy-auto-brightness/issues/8)) ([e5c3305](https://github.com/joaodrp/omarchy-auto-brightness/commit/e5c3305151d97d107b104bbcc9ef85687e1200f5))
+
 ## [0.1.2](https://github.com/joaodrp/omarchy-auto-brightness/compare/v0.1.1...v0.1.2) (2026-09-19)
 
 
