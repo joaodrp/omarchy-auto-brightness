@@ -284,6 +284,171 @@ handle_command() {
   esac
 }
 
+
+# Read the display. Returns 0 when it is where we left it, 1 when someone
+# else moved it (now adopted), 2 when it could not be read.
+sync_from_display() {
+  local current
+  current=$("${kind}_read" || true)
+  [[ $current =~ ^[0-9]+$ ]] || return 2
+  last_read=$SECONDS
+  read_this_poll=1
+  if (( last_applied == 0 || current == last_applied )); then
+    last_applied=$current
+    [[ -n $brightness ]] || brightness=$(units_pct "$current")
+    return 0
+  fi
+  learn_manual "$(units_pct "$current")"
+  last_applied=$current
+  return 1
+}
+
+# Writes bypass the routing helper, straight to the profile's own path. The
+# helper holds a non-blocking lock and silently drops a write
+# that collides with a hotkey, in either direction: a ramp would lose its own
+# steps, or drop the user's presses. Without the lock both writes reach the
+# display, and the read-back before the next write adopts whichever landed
+# last.
+write_display() {
+  local started=$EPOCHREALTIME
+  "${kind}_write" "$1" || return 1
+  last_applied=$1
+  write_seconds=$(awk -v a="$started" -v b="$EPOCHREALTIME" -v w="$write_seconds" 'BEGIN { printf "%.4f", w + 0.3 * ((b - a) - w) }')
+}
+
+# Fade from where the display is to the target over one poll, a write per
+# frame. The wait between frames is the command reader too, so a command cuts
+# the fade short and is handled at once; EOF means the service is gone. Writes
+# slower than planned stop at the poll's end, and the next poll fades on from
+# wherever the display got to.
+write_ramp() {
+  local to="$1" frame value left n=0 fade_started=$EPOCHREALTIME
+  if (( last_applied == 0 )); then write_display "$to"; return; fi
+  frame=$(frame_seconds)
+  while read -r value; do
+    write_display "$value" || return 1
+    n=$(( n + 1 ))
+    # Frames keep to a clock from the fade's start, so overhead never adds up.
+    left=$(awk -v f="$frame" -v n="$n" -v b="$EPOCHREALTIME" -v s="$fade_started" -v p="$poll_interval" \
+      'BEGIN { if (b - s >= p) { print "over"; exit } l = s + n * f - b; printf "%.4f", (l > 0 ? l : 0) }')
+    [[ $left == over ]] && return 0
+    [[ $left == 0.0000 ]] && continue
+    if read -t "$left" -r command argument <&3; then
+      handle_command "$command" "${argument:-}"
+      return 0
+    elif (( $? <= 128 )); then
+      exit 0
+    fi
+  done < <(ramp_frames "$last_applied" "$to" "$poll_interval")
+}
+
+emit_status() {
+  local available="$1" error="$2" p=false
+  (( paused )) && p=true
+  printf '{"available":%s,"monitor":"%s","lux":%.1f,"brightness":%d,"target":%.1f,"offset":%d,"paused":%s,"seen":%d,"error":"%s"}\n' \
+    "$available" "$monitor" "${filtered_lux:-0}" "$(units_pct "$last_applied")" "${target:-0}" "$offset" "$p" "$commands_seen" "$error"
+}
+
+reset_state() {
+  monitor=""
+  kind=""
+  backlight=""
+  sensor=""
+  last_detect=0
+  filtered_lux=""
+  accepted_lux=""
+  pending_dir=0
+  pending_since=0
+  brightness=""
+  base_target=""
+  ramp_target=""
+  ramp_span=0
+  last_applied=0
+  last_read=0
+}
+
+
+# The display could not be read. Drop it, so the next poll detects and
+# attaches it afresh: its device may be back under another name.
+display_lost() {
+  emit_status true "Could not read the display"
+  reset_state
+  next_delay=$retry_interval
+}
+
+# One pass. Sets next_delay for the wait that follows.
+poll() {
+  next_delay=$poll_interval
+  read_this_poll=0
+
+  local chosen
+  if [[ -z $monitor ]] || (( SECONDS - last_detect >= manual_check_interval )); then
+    chosen=$(detect_monitor)
+    if [[ $chosen != "$monitor $kind" ]]; then
+      reset_state
+      if [[ -z $chosen ]]; then
+        emit_status false "No supported display connected"
+        next_delay=$retry_interval
+        return
+      fi
+      read -r monitor kind <<<"$chosen"
+      if ! "${kind}_attach" || ! levels=$("${kind}_levels") || [[ ! $levels =~ ^[1-9][0-9]*$ ]]; then
+        emit_status false "Cannot drive $monitor"
+        reset_state
+        next_delay=$retry_interval
+        return
+      fi
+    fi
+    last_detect=$SECONDS
+  fi
+  if [[ -z $sensor ]]; then
+    if ! read -r sensor als_scale als_offset < <(discover_sensor "$kind"); then
+      emit_status false "No light sensor found for $monitor"
+      reset_state
+      next_delay=$retry_interval
+      return
+    fi
+  fi
+  if ! raw=$(<"$sensor") || [[ ! $raw =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    emit_status false "Could not read the ambient light sensor"
+    reset_state
+    next_delay=$retry_interval
+    return
+  fi
+
+  # First pass, and every idle interval: see where the display really is.
+  if [[ -z $brightness ]] || (( SECONDS - last_read >= manual_check_interval )); then
+    sync_from_display
+    if (( $? == 2 )); then display_lost; return; fi
+  fi
+
+  read -r filtered_lux accepted_lux pending_dir pending_since brightness base_target target desired ramp_target ramp_span <<<"$(
+    calculate "$raw" "$filtered_lux" "$accepted_lux" "$pending_dir" "$pending_since" "$SECONDS" "$brightness" "$ramp_target" "$ramp_span"
+  )"
+
+  if (( desired != last_applied )); then
+    if (( user_request )); then
+      # The user's hand lands at once; only the room is ramped.
+      user_request=0
+      write_display "$desired" || { emit_status true "Brightness command failed"; reset_state; return; }
+    else
+      # Never overwrite a hotkey press: look first, unless we looked this poll.
+      if (( ! read_this_poll )); then
+        sync_from_display
+        case $? in
+          1) emit_status true ""; return ;;
+          2) display_lost; return ;;
+        esac
+      fi
+      write_ramp "$desired" || { emit_status true "Brightness command failed"; reset_state; return; }
+      # The fade took the poll already; carry straight on.
+      next_delay=0.001
+    fi
+  fi
+
+  emit_status true ""
+}
+
 if [[ ${1:-} == --self-test ]]; then
   fail() { echo "self-test: $*" >&2; exit 1; }
   run() {
@@ -395,168 +560,20 @@ if [[ ${1:-} == --self-test ]]; then
   [[ $(discover_sensor panel) == "$iio_root/iio:device1/in_illuminance_input 1 0" ]] || fail "processed sensor: $(discover_sensor panel)"
   rm -r "$iio_root/i2c-FRMW0005" "$iio_root/iio:device1"
   discover_sensor panel >/dev/null && fail "the Apple sensor must not stand in for the panel's"
+  # A display that cannot be read is dropped, so the next poll detects and
+  # attaches it afresh: a backlight that came back under a new name is found.
+  detect_monitor() { echo "eDP-1 panel"; }
+  panel_attach() { backlight=gone; }
+  panel_levels() { echo 100; }
+  panel_read() { return 1; }
+  sensor_file=$(mktemp); echo 5 >"$sensor_file"
+  discover_sensor() { echo "$sensor_file 1 0"; }
+  reset_state; poll >/dev/null
+  [[ -z $monitor && -z $kind && -z $backlight ]] || fail "unreadable display kept: monitor=$monitor kind=$kind backlight=$backlight"
+  rm -f "$sensor_file"
   echo ok
   exit 0
 fi
-
-# Read the display. Returns 0 when it is where we left it, 1 when someone
-# else moved it (now adopted), 2 when it could not be read.
-sync_from_display() {
-  local current
-  current=$("${kind}_read" || true)
-  [[ $current =~ ^[0-9]+$ ]] || return 2
-  last_read=$SECONDS
-  read_this_poll=1
-  if (( last_applied == 0 || current == last_applied )); then
-    last_applied=$current
-    [[ -n $brightness ]] || brightness=$(units_pct "$current")
-    return 0
-  fi
-  learn_manual "$(units_pct "$current")"
-  last_applied=$current
-  return 1
-}
-
-# Writes bypass the routing helper, straight to the profile's own path. The
-# helper holds a non-blocking lock and silently drops a write
-# that collides with a hotkey, in either direction: a ramp would lose its own
-# steps, or drop the user's presses. Without the lock both writes reach the
-# display, and the read-back before the next write adopts whichever landed
-# last.
-write_display() {
-  local started=$EPOCHREALTIME
-  "${kind}_write" "$1" || return 1
-  last_applied=$1
-  write_seconds=$(awk -v a="$started" -v b="$EPOCHREALTIME" -v w="$write_seconds" 'BEGIN { printf "%.4f", w + 0.3 * ((b - a) - w) }')
-}
-
-# Fade from where the display is to the target over one poll, a write per
-# frame. The wait between frames is the command reader too, so a command cuts
-# the fade short and is handled at once; EOF means the service is gone. Writes
-# slower than planned stop at the poll's end, and the next poll fades on from
-# wherever the display got to.
-write_ramp() {
-  local to="$1" frame value left n=0 fade_started=$EPOCHREALTIME
-  if (( last_applied == 0 )); then write_display "$to"; return; fi
-  frame=$(frame_seconds)
-  while read -r value; do
-    write_display "$value" || return 1
-    n=$(( n + 1 ))
-    # Frames keep to a clock from the fade's start, so overhead never adds up.
-    left=$(awk -v f="$frame" -v n="$n" -v b="$EPOCHREALTIME" -v s="$fade_started" -v p="$poll_interval" \
-      'BEGIN { if (b - s >= p) { print "over"; exit } l = s + n * f - b; printf "%.4f", (l > 0 ? l : 0) }')
-    [[ $left == over ]] && return 0
-    [[ $left == 0.0000 ]] && continue
-    if read -t "$left" -r command argument <&3; then
-      handle_command "$command" "${argument:-}"
-      return 0
-    elif (( $? <= 128 )); then
-      exit 0
-    fi
-  done < <(ramp_frames "$last_applied" "$to" "$poll_interval")
-}
-
-emit_status() {
-  local available="$1" error="$2" p=false
-  (( paused )) && p=true
-  printf '{"available":%s,"monitor":"%s","lux":%.1f,"brightness":%d,"target":%.1f,"offset":%d,"paused":%s,"seen":%d,"error":"%s"}\n' \
-    "$available" "$monitor" "${filtered_lux:-0}" "$(units_pct "$last_applied")" "${target:-0}" "$offset" "$p" "$commands_seen" "$error"
-}
-
-reset_state() {
-  monitor=""
-  kind=""
-  backlight=""
-  sensor=""
-  last_detect=0
-  filtered_lux=""
-  accepted_lux=""
-  pending_dir=0
-  pending_since=0
-  brightness=""
-  base_target=""
-  ramp_target=""
-  ramp_span=0
-  last_applied=0
-  last_read=0
-}
-
-
-# One pass. Sets next_delay for the wait that follows.
-poll() {
-  next_delay=$poll_interval
-  read_this_poll=0
-
-  local chosen
-  if [[ -z $monitor ]] || (( SECONDS - last_detect >= manual_check_interval )); then
-    chosen=$(detect_monitor)
-    if [[ $chosen != "$monitor $kind" ]]; then
-      reset_state
-      if [[ -z $chosen ]]; then
-        emit_status false "No supported display connected"
-        next_delay=$retry_interval
-        return
-      fi
-      read -r monitor kind <<<"$chosen"
-      if ! "${kind}_attach" || ! levels=$("${kind}_levels") || [[ ! $levels =~ ^[1-9][0-9]*$ ]]; then
-        emit_status false "Cannot drive $monitor"
-        reset_state
-        next_delay=$retry_interval
-        return
-      fi
-    fi
-    last_detect=$SECONDS
-  fi
-  if [[ -z $sensor ]]; then
-    if ! read -r sensor als_scale als_offset < <(discover_sensor "$kind"); then
-      emit_status false "No light sensor found for $monitor"
-      reset_state
-      next_delay=$retry_interval
-      return
-    fi
-  fi
-  if ! raw=$(<"$sensor") || [[ ! $raw =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-    emit_status false "Could not read the ambient light sensor"
-    reset_state
-    next_delay=$retry_interval
-    return
-  fi
-
-  # First pass, and every idle interval: see where the display really is.
-  if [[ -z $brightness ]] || (( SECONDS - last_read >= manual_check_interval )); then
-    sync_from_display
-    if (( $? == 2 )); then
-      emit_status true "Could not read the display"
-      return
-    fi
-  fi
-
-  read -r filtered_lux accepted_lux pending_dir pending_since brightness base_target target desired ramp_target ramp_span <<<"$(
-    calculate "$raw" "$filtered_lux" "$accepted_lux" "$pending_dir" "$pending_since" "$SECONDS" "$brightness" "$ramp_target" "$ramp_span"
-  )"
-
-  if (( desired != last_applied )); then
-    if (( user_request )); then
-      # The user's hand lands at once; only the room is ramped.
-      user_request=0
-      write_display "$desired" || { emit_status true "Brightness command failed"; reset_state; return; }
-    else
-      # Never overwrite a hotkey press: look first, unless we looked this poll.
-      if (( ! read_this_poll )); then
-        sync_from_display
-        if (( $? != 0 )); then
-          emit_status true ""
-          return
-        fi
-      fi
-      write_ramp "$desired" || { emit_status true "Brightness command failed"; reset_state; return; }
-      # The fade took the poll already; carry straight on.
-      next_delay=0.001
-    fi
-  fi
-
-  emit_status true ""
-}
 
 trap 'exit 0' TERM INT
 exec 3<&0  # the service's commands, readable inside write_ramp's frame loop
