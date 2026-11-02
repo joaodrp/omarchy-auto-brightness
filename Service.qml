@@ -1,11 +1,13 @@
 import QtQuick
 import Quickshell.Io
+import "Settings.js" as Settings
 
 // Owns the auto brightness controller. Settings live inline on this plugin's
-// shell.json entry as `auto` (default on) and `offset` (default 0) and are
-// pushed to the controller over stdin; every change, from the panel, Setup,
-// IPC or a hotkey the controller noticed, goes through shell.json so there is
-// one path. Live readings come back as JSON lines.
+// shell.json entry as `auto` (default on) and `offset` (default 0). Changes
+// made here, from the panel, IPC or an offset the controller learned, go to
+// the controller at once and are then persisted; a change made in Setup
+// arrives through the config. Settings.js keeps the two apart. Live readings
+// come back as JSON lines.
 Item {
   id: root
 
@@ -25,6 +27,11 @@ Item {
 
   property bool tearingDown: false
 
+  // Settings.js state, null until the first controller starts, and the lines
+  // written to the running controller.
+  property var settings: null
+  property int sentLines: 0
+
   function configEntry() {
     var sections = ["left", "center", "right"]
     var layout = shell?.barConfig?.layout
@@ -37,26 +44,40 @@ Item {
   }
 
   function send(line) {
-    if (controller.running) controller.write(line + "\n")
+    if (!controller.running) return false
+    controller.write(line + "\n")
+    sentLines++
+    return true
   }
 
-  // Read the persisted settings and push them. Idempotent, so it runs on
-  // every config change and right after the controller starts.
+  function apply(result) {
+    settings = result.state
+    enabled = settings.held.auto
+    offset = settings.held.offset
+    for (var i = 0; i < result.lines.length; i++) send(result.lines[i])
+  }
+
   function syncSettings() {
-    var entry = configEntry()
-    enabled = entry.auto !== false
-    offset = Number.isInteger(entry.offset) ? entry.offset : 0
-    send("auto " + (enabled ? "on" : "off"))
-    send("offset " + offset)
+    var next = Settings.read(configEntry())
+    if (!settings) {
+      enabled = next.auto
+      offset = next.offset
+      return
+    }
+    apply(Settings.configEvent(settings, next))
   }
 
-  function persist(values) {
+  // A change of ours. `tell` is false when the controller made it.
+  function change(values, tell) {
     if (!shell || !manifest) return
-    shell.updateEntryInline(manifest.id, Object.assign({}, configEntry(), values, { id: manifest.id }))
+    var result = Settings.own(settings || Settings.start(Settings.read(configEntry())).state, values)
+    if (!tell) result.lines = []
+    apply(result)
+    shell.updateEntryInline(manifest.id, Object.assign({}, configEntry(), result.persist, { id: manifest.id }))
   }
 
-  function setEnabled(value) { persist({ auto: value === true }) }
-  function setOffset(value) { persist({ offset: Math.round(Number(value)) }) }
+  function setEnabled(value) { change({ auto: value === true }, true) }
+  function setOffset(value) { change({ offset: Math.round(Number(value)) }, true) }
   function clearOffset() { setOffset(0) }
 
   // The user picked a brightness. The controller writes it, and with auto on
@@ -72,7 +93,8 @@ Item {
     if (controller.running) return
     controller.command = ["setpriv", "--pdeathsig", "TERM", controllerPath]
     controller.running = true
-    syncSettings()
+    sentLines = 0
+    apply(Settings.start(Settings.read(configEntry()), settings))
   }
 
   function applyStatus(line) {
@@ -84,11 +106,8 @@ Item {
       brightness = status.brightness
       target = status.target
       error = status.error
-      if (status.offset !== offset) {
-        // Set before persisting so the config change reads as already known.
-        offset = status.offset
-        persist({ offset: status.offset })
-      }
+      var learned = Settings.learnedOffset(status, sentLines, offset)
+      if (learned !== null) change({ offset: learned }, false)
     } catch (e) {
       error = "Invalid controller status"
     }
@@ -138,7 +157,11 @@ Item {
     }
     function enable(): string { root.setEnabled(true); return "enabled" }
     function disable(): string { root.setEnabled(false); return "disabled" }
-    function toggle(): string { root.setEnabled(!root.enabled); return root.enabled ? "disabled" : "enabled" }
+    function toggle(): string {
+      var next = !root.enabled
+      root.setEnabled(next)
+      return next ? "enabled" : "disabled"
+    }
     function forget(): string { root.clearOffset(); return "forgot" }
     function set(percent: string): string { root.setBrightness(percent); return "set " + Math.round(Number(percent)) }
   }

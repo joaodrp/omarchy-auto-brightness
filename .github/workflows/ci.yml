@@ -19,6 +19,13 @@ jobs:
       - name: Controller self-test
         run: ./controller --self-test
 
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - name: Settings unit tests
+        run: node test/settings.test.js
+
       - name: Manifest matches the repo and the README
         run: python3 .github/check-manifest.py
 

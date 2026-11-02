@@ -56,14 +56,15 @@ for key in set(schema) - documented:
 for key in documented - set(schema):
     fail(f"the README documents a setting {key!r} that manifest.json does not have")
 
-# The service reads each setting off the shell.json entry by key. A key that
-# is read but not declared, or declared but never read, is a silent divergence.
-service = (ROOT / manifest["entryPoints"]["service"]).read_text()
+# The service reads each setting off the shell.json entry by key, through
+# Settings.js. A key that is read but not declared, or declared but never
+# read, is a silent divergence.
+service = (ROOT / manifest["entryPoints"]["service"]).read_text() + (ROOT / "Settings.js").read_text()
 read_keys = set(re.findall(r"\bentry\.([a-zA-Z]+)\b", service)) - {"id"}
 for key in read_keys - set(schema):
-    fail(f"Service.qml reads setting {key!r}, which manifest.json does not declare")
+    fail(f"the service reads setting {key!r}, which manifest.json does not declare")
 for key in set(schema) - read_keys:
-    fail(f"setting {key!r} is declared in manifest.json but Service.qml never reads it")
+    fail(f"setting {key!r} is declared in manifest.json but the service never reads it")
 
 if errors:
     for line in errors:

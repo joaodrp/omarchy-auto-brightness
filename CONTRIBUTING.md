@@ -42,6 +42,7 @@ qs log -p "$OMARCHY_PATH/shell" --tail 60   # QML errors land here, and only wit
 
 ```sh
 ./controller --self-test           # curve, hysteresis, debounce, ramp, offset
+node test/settings.test.js         # what the service sends and persists
 omarchy plugin validate "$PWD"
 python3 .github/check-manifest.py  # manifest, README table and Service.qml reads agree
 
@@ -63,7 +64,7 @@ omarchy-brightness-display --monitor DP-3 40%  # a "hotkey" change; becomes the 
 omarchy-shell auto-brightness disable          # Manual
 ```
 
-CI runs the self-test and the manifest check. `omarchy plugin validate` and the
+CI runs the self-test, the settings tests and the manifest check. `omarchy plugin validate` and the
 linter need Omarchy and Quickshell on the machine, so run those two yourself.
 
 ## Changing the controller
