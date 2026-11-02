@@ -48,11 +48,17 @@ brighten_cap=2
 dim_rate=13
 dim_cap=3
 # Transitions are as smooth as the hardware allows. Each poll's move is
-# written as a run of steps, back to back; a step is whatever the rate covers
-# in one write's time, never less than one point. So the step follows the
-# measured write latency (about 80 ms on this display) and needs no constant
-# of its own.
-write_seconds=0.1  # first estimate; measured from the first write on
+# spread over the poll as evenly paced writes, one per write's time (about
+# 80 ms on the Studio Display, 4 ms on a laptop backlight) but no faster than
+# max_frame_rate, which is past what the eye resolves as steps. On a display
+# with fine levels the fade is interpolated in log luminance, as perceived
+# brightness goes; on a coarse one, linearly, since a log fade would only
+# bunch its few visible steps together.
+# First estimate, measured from the first write on. Optimistic: a slower
+# display only runs into the fade's deadline for the first poll.
+write_seconds=0.02
+max_frame_rate=60
+levels=100         # brightness units end to end; set by the display's profile
 
 # Lux anchors -> brightness percent, interpolated in log2(lux). One percent is
 # about 6 nits on this display (raw 400..60000 spans roughly 4..600 nits), so
@@ -69,6 +75,7 @@ offset=0
 # so bash never does floating point.
 #   in:  raw filtered accepted pending_dir pending_since now brightness ramp_target ramp_span
 #   out: filtered accepted pending_dir pending_since brightness curve target desired ramp_target ramp_span
+#   (desired is in the display's units, the rest in percent)
 calculate() {
   awk \
     -v raw="$1" -v filtered="$2" -v accepted="$3" \
@@ -80,7 +87,7 @@ calculate() {
     -v up_debounce="$brighten_debounce" -v down_debounce="$darken_debounce" \
     -v up_rate="$brighten_rate" -v up_cap="$brighten_cap" \
     -v down_rate="$dim_rate" -v down_cap="$dim_cap" -v poll="$poll_interval" \
-    -v lux_points="$lux_points" -v pct_points="$pct_points" '
+    -v lux_points="$lux_points" -v pct_points="$pct_points" -v levels="$levels" '
     function curve(value,    n, i, x, xa, xb, t) {
       n = split(lux_points, lp, " ")
       split(pct_points, pp, " ")
@@ -136,7 +143,7 @@ calculate() {
         if (ramp_span * poll / cap > step) step = ramp_span * poll / cap
         brightness = span <= step ? target : brightness + (delta > 0 ? step : -step)
       }
-      desired = int(clamp(brightness) + 0.5)
+      desired = int(clamp(brightness) * levels / 100 + 0.5)
 
       printf "%.10f %.10f %d %d %.10f %.10f %.10f %d %.10f %.10f\n", \
         filtered, accepted, pending_dir, pending_since, brightness, base_target, target, desired, ramp_target, ramp_span
@@ -154,9 +161,33 @@ learn_manual() {
   ramp_target=""
 }
 
-# Points per write for a rate: what the rate covers in one write, at least 1.
-step_for() {
-  awk -v rate="$1" -v w="$write_seconds" 'BEGIN { s = int(rate * w + 0.5); print s < 1 ? 1 : s }'
+# Seconds per write while fading: the write's own time, but at most
+# max_frame_rate writes a second.
+frame_seconds() {
+  awk -v w="$write_seconds" -v r="$max_frame_rate" 'BEGIN { f = 1 / r; printf "%.4f", (w > f ? w : f) }'
+}
+
+# The writes that take the display from units FROM to TO over SECONDS, one
+# per frame: interpolated in log luminance when levels are fine, linearly
+# when coarse, rounded to whole units, repeats dropped. Always ends on TO.
+ramp_frames() {
+  awk -v from="$1" -v to="$2" -v seconds="$3" -v frame="$(frame_seconds)" -v levels="$levels" 'BEGIN {
+    n = int(seconds / frame); if (n < 1) n = 1
+    a = from < 1 ? 1 : from; b = to < 1 ? 1 : to
+    prev = from
+    for (i = 1; i <= n; i++) {
+      t = i / n
+      v = levels > 100 ? exp(log(a) + (log(b) - log(a)) * t) : a + (b - a) * t
+      v = i == n ? to : int(v + 0.5)
+      if (v != prev) print v
+      prev = v
+    }
+  }'
+}
+
+# Percent of the display's range, for status and learning, from units.
+units_pct() {
+  awk -v u="$1" -v l="$levels" 'BEGIN { printf "%d", u * 100 / l + 0.5 }'
 }
 
 # Display profiles, in priority order: the first kind with a matching output
@@ -166,7 +197,9 @@ step_for() {
 #   <kind>_attach         prepare writes to $monitor; fail if impossible
 #   <kind>_sensor DEV     DEV, an IIO device, is this display's light sensor;
 #                         print "file scale offset"
-#   <kind>_write PCT      set the display to PCT percent
+#   <kind>_levels         print the brightness units end to end
+#   <kind>_read           print the brightness, in units
+#   <kind>_write UNITS    set the brightness, in units
 profiles="apple panel"
 
 # Apple: the same test omarchy-brightness-display routes on, so the output
@@ -180,6 +213,8 @@ apple_sensor() {
   [[ $(<"$1/name") == als && -r $1/in_illuminance_raw && $(readlink -f "$1") == *05[aA][cC]:* ]] || return 1
   printf '%s %s 0\n' "$1/in_illuminance_raw" "$apple_als_scale"
 }
+apple_levels() { echo 100; }  # percent: asdcontrol's 400..60000 shows only about 20 steps
+apple_read() { timeout 10 omarchy-brightness-display --monitor "$monitor" 2>/dev/null; }
 apple_write() { timeout 10 omarchy-brightness-display-apple --no-osd "$1%" >/dev/null 2>&1; }
 
 # Panel: the laptop's internal output. A closed lid disables it, which drops
@@ -201,7 +236,9 @@ panel_sensor() {
     return 1
   fi
 }
-panel_write() { timeout 10 brightnessctl -q -d "$backlight" set "$1%" >/dev/null 2>&1; }
+panel_levels() { cat "/sys/class/backlight/$backlight/max_brightness"; }
+panel_read() { cat "/sys/class/backlight/$backlight/brightness"; }
+panel_write() { timeout 10 brightnessctl -q -d "$backlight" set "$1" >/dev/null 2>&1; }
 
 # Which output to drive, from `hyprctl monitors -j` on stdin. Prints
 # "name kind".
@@ -298,11 +335,28 @@ if [[ ${1:-} == --self-test ]]; then
   (( offset == 16 && brightness == 30 )) || fail "manual 30 over curve 14 gave offset $offset"
   paused=1; offset=0; learn_manual 40
   (( offset == 0 && brightness == 40 )) || fail "manual while paused changed the offset to $offset"
-  # Step per write follows the write latency: 80 ms gives 2 up and 1 down,
-  # a 10 ms panel gives 1 both ways, a slow 300 ms link gives 6 and 4.
-  write_seconds=0.08; [[ $(step_for 20) == 2 && $(step_for 13) == 1 ]] || fail "80 ms steps: $(step_for 20) $(step_for 13)"
-  write_seconds=0.01; [[ $(step_for 20) == 1 && $(step_for 13) == 1 ]] || fail "10 ms steps should floor at 1"
-  write_seconds=0.3;  [[ $(step_for 20) == 6 && $(step_for 13) == 4 ]] || fail "300 ms steps: $(step_for 20) $(step_for 13)"
+  # Frames follow the write latency, capped at 60 a second: an 80 ms display
+  # writes every 80 ms, a 4 ms backlight every 1/60 s.
+  write_seconds=0.08; [[ $(frame_seconds) == 0.0800 ]] || fail "80 ms frames: $(frame_seconds)"
+  write_seconds=0.004; [[ $(frame_seconds) == 0.0167 ]] || fail "frames should cap at 60/s: $(frame_seconds)"
+  # Coarse levels fade linearly: 20 -> 40 % in 0.5 s of 80 ms frames is six
+  # writes, about 3 points apart, ending on 40.
+  levels=100; write_seconds=0.08
+  [[ $(ramp_frames 20 40 0.5 | paste -sd' ') == "23 27 30 33 37 40" ]] || fail "linear frames: $(ramp_frames 20 40 0.5 | paste -sd' ')"
+  # Fine levels fade in log luminance: 1000 -> 100000 in 2 frames passes the
+  # geometric middle, 10000, not the linear one.
+  levels=192000; write_seconds=0.25
+  [[ $(ramp_frames 1000 100000 0.5 | paste -sd' ') == "10000 100000" ]] || fail "log frames: $(ramp_frames 1000 100000 0.5 | paste -sd' ')"
+  # A fine fade at 60/s is about 30 writes a poll, none repeated.
+  write_seconds=0.004
+  n=$(ramp_frames 9600 76800 0.5 | wc -l); (( n >= 29 && n <= 30 )) || fail "fine fade wrote $n frames, want about 30"
+  [[ $(ramp_frames 9600 76800 0.5 | sort -u | wc -l) == "$n" ]] || fail "fine fade repeated a value"
+  # Too short a fade for coarse levels: 5 -> 6 is one write, not ten.
+  levels=100; write_seconds=0.004
+  [[ $(ramp_frames 5 6 0.5 | paste -sd' ') == "6" ]] || fail "5 -> 6 should be one write: $(ramp_frames 5 6 0.5 | paste -sd' ')"
+  # Units to percent for the status and learning.
+  levels=192000; [[ $(units_pct 44160) == 23 ]] || fail "44160 of 192000 should be 23%"
+  levels=100; write_seconds=0.1
   # Settings re-sent unchanged leave the loop alone: the service may push the
   # same values many times, and each must not restart the ramp or re-read.
   commands_seen=0
@@ -349,16 +403,16 @@ fi
 # else moved it (now adopted), 2 when it could not be read.
 sync_from_display() {
   local current
-  current=$(timeout 10 omarchy-brightness-display --monitor "$monitor" 2>/dev/null || true)
+  current=$("${kind}_read" || true)
   [[ $current =~ ^[0-9]+$ ]] || return 2
   last_read=$SECONDS
   read_this_poll=1
   if (( last_applied == 0 || current == last_applied )); then
     last_applied=$current
-    [[ -n $brightness ]] || brightness=$current
+    [[ -n $brightness ]] || brightness=$(units_pct "$current")
     return 0
   fi
-  learn_manual "$current"
+  learn_manual "$(units_pct "$current")"
   last_applied=$current
   return 1
 }
@@ -376,24 +430,37 @@ write_display() {
   write_seconds=$(awk -v a="$started" -v b="$EPOCHREALTIME" -v w="$write_seconds" 'BEGIN { printf "%.4f", w + 0.3 * ((b - a) - w) }')
 }
 
-# Walk from where the display is to the target, one write per step.
+# Fade from where the display is to the target over one poll, a write per
+# frame. The wait between frames is the command reader too, so a command cuts
+# the fade short and is handled at once; EOF means the service is gone. Writes
+# slower than planned stop at the poll's end, and the next poll fades on from
+# wherever the display got to.
 write_ramp() {
-  local to="$1" step from
-  from=$last_applied
-  if (( from == 0 )); then write_display "$to"; return; fi
-  if (( to > from )); then step=$(step_for "$brighten_rate"); else step=-$(step_for "$dim_rate"); fi
-  while (( (step > 0 && from + step < to) || (step < 0 && from + step > to) )); do
-    from=$(( from + step ))
-    write_display "$from" || return 1
-  done
-  write_display "$to"
+  local to="$1" frame value left n=0 fade_started=$EPOCHREALTIME
+  if (( last_applied == 0 )); then write_display "$to"; return; fi
+  frame=$(frame_seconds)
+  while read -r value; do
+    write_display "$value" || return 1
+    n=$(( n + 1 ))
+    # Frames keep to a clock from the fade's start, so overhead never adds up.
+    left=$(awk -v f="$frame" -v n="$n" -v b="$EPOCHREALTIME" -v s="$fade_started" -v p="$poll_interval" \
+      'BEGIN { if (b - s >= p) { print "over"; exit } l = s + n * f - b; printf "%.4f", (l > 0 ? l : 0) }')
+    [[ $left == over ]] && return 0
+    [[ $left == 0.0000 ]] && continue
+    if read -t "$left" -r command argument <&3; then
+      handle_command "$command" "${argument:-}"
+      return 0
+    elif (( $? <= 128 )); then
+      exit 0
+    fi
+  done < <(ramp_frames "$last_applied" "$to" "$poll_interval")
 }
 
 emit_status() {
   local available="$1" error="$2" p=false
   (( paused )) && p=true
   printf '{"available":%s,"monitor":"%s","lux":%.1f,"brightness":%d,"target":%.1f,"offset":%d,"paused":%s,"seen":%d,"error":"%s"}\n' \
-    "$available" "$monitor" "${filtered_lux:-0}" "$last_applied" "${target:-0}" "$offset" "$p" "$commands_seen" "$error"
+    "$available" "$monitor" "${filtered_lux:-0}" "$(units_pct "$last_applied")" "${target:-0}" "$offset" "$p" "$commands_seen" "$error"
 }
 
 reset_state() {
@@ -431,7 +498,7 @@ poll() {
         return
       fi
       read -r monitor kind <<<"$chosen"
-      if ! "${kind}_attach"; then
+      if ! "${kind}_attach" || ! levels=$("${kind}_levels") || [[ ! $levels =~ ^[1-9][0-9]*$ ]]; then
         emit_status false "Cannot drive $monitor"
         reset_state
         next_delay=$retry_interval
@@ -483,8 +550,8 @@ poll() {
         fi
       fi
       write_ramp "$desired" || { emit_status true "Brightness command failed"; reset_state; return; }
-      # The steps took most of the poll already.
-      next_delay=0.05
+      # The fade took the poll already; carry straight on.
+      next_delay=0.001
     fi
   fi
 
@@ -492,6 +559,7 @@ poll() {
 }
 
 trap 'exit 0' TERM INT
+exec 3<&0  # the service's commands, readable inside write_ramp's frame loop
 
 user_request=0
 commands_seen=0

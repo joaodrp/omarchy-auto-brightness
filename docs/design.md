@@ -16,12 +16,12 @@ the user touches the keys.
 
 ## Principles
 
-- **Transitions are as smooth as the hardware allows.** The step is the
-  smallest the display can take in the time one write costs, and the
-  number of writes is whatever the rate then requires. Nothing about the
-  fade is a per-display constant; the controller measures its own write
-  latency and derives the step from it, so a faster display gets finer
-  steps for free and a slower link gets coarser ones without stalling.
+- **Transitions are as smooth as the hardware allows.** A fade writes as
+  often as the display takes writes, up to 60 a second, in the display's
+  own units. Nothing about the fade is tuned per display: the controller
+  measures its write latency and reads the display's resolution from its
+  profile, so a faster, finer display gets a smoother fade for free and a
+  slower link gets coarser steps without stalling.
 - **The user's hand always wins, and lands at once.** A manual change is
   written in one step, adopted, never fought, and becomes the standing
   correction. Only the room's changes are ramped.
@@ -136,11 +136,21 @@ is invisible. Step-detection thresholds sit around 6 to 30% Weber
 contrast depending on adaptation, and luminance transients make changes
 more detectable, not less (blocking the transient cut detection by about
 30% in one study). The engineering target for an invisible fade is a per
-update change of 1 to 2%. A write to this display takes about 80 ms, so
-each poll's move is written as a run of steps, one per write: the step is
-what the rate covers in one write's time, which here is two points
-brightening and one dimming; the fade is then as fine as the panel can
-show, and the rule carries to any display without a new constant. The `asdcontrol` README reports about 20
+update change of 1 to 2%.
+
+How each poll's move is written:
+
+| Choice | Value | Why |
+|--------|-------|-----|
+| Pacing | Spread over the poll, on a clock from the fade's start | Writing the move back to back and then idling until the next poll reads as a stutter: a burst, then a pause. |
+| Frame rate | One write per write's time, at most 60 a second (`max_frame_rate`) | Past the rate at which the eye resolves discrete steps in a smooth change; a laptop backlight write costs about 4 ms, so 60 is the binding limit there. A slower display writes as fast as it can. |
+| Resolution | The display's own units, from its profile | A laptop backlight has 192000 levels; whole percents are 1920 apart, and at 5% one percent is 20% more light, well past the 1 to 2% target. |
+| Shape | Log luminance when levels are fine, linear when coarse | Equal steps in log luminance look equal; in linear percent the dim end jumps. On a coarse display a log fade only bunches its few visible steps together. |
+| Deadline | A poll's fade stops when the poll is up | A write slower than estimated cannot hold up commands or the next poll, which fades on from where the display got to. |
+| First estimate | 20 ms, measured from the first write on | Optimistic, so a fast panel is smooth from its first fade; a slow display only meets the deadline once. |
+
+On the Studio Display a write takes about 80 ms, so a poll's move is six
+writes about two points apart. The `asdcontrol` README reports about 20
 visible backlight levels on 2022 firmware; the firmware accepts every
 percent (raw values 596 apart), and whether each is visible has not been
 measured. The earlier exponential ramp spread a 40-point dim over 15 s,
