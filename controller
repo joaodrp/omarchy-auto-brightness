@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Ambient-light brightness controller for one Apple Studio Display.
-# Owns the display in both modes. Prints one JSON status line per poll on
+# Ambient-light brightness controller for one display: an Apple Studio
+# Display when one is connected, else the laptop panel while its lid is open.
+# Owns that display in both modes. Prints one JSON status line per poll on
 # stdout; Service.qml reads them and sends settings and requests on stdin:
 #   auto on|off   follow the room, or leave brightness where it is
 #   offset N      correction to the curve, in brightness points
@@ -19,13 +20,18 @@
 set -u
 export LC_ALL=C  # printf %.1f must emit a dot, whatever the session locale
 
-als_scale=0.001  # the HID ALS reports millilux: ~10000 raw in a dim evening room
+# Lux = (raw + als_offset) * als_scale, set per sensor on discovery.
+apple_als_scale=0.001  # the Studio Display reports millilux, though its kernel scale reads 1.0
+als_scale=1
+als_offset=0
+iio_root=/sys/bus/iio/devices
 poll_interval=0.5
 retry_interval=5  # while no display or sensor is present
 # Idle read-back interval. Every read-back is a `sudo asdcontrol` call that
 # lands in the journal. Before any write there is always a read-back, so a
 # hotkey press is never overwritten; while idle this is how often one is
-# noticed.
+# noticed. It is also how often the active display is re-chosen, so
+# plugging the Studio Display in or out switches over within it.
 manual_check_interval=10
 lux_ema_alpha=0.25
 brighten_threshold=0.10  # accept a brighter room at 10% above the accepted lux
@@ -66,7 +72,7 @@ calculate() {
     -v raw="$1" -v filtered="$2" -v accepted="$3" \
     -v pending_dir="$4" -v pending_since="$5" -v now="$6" \
     -v brightness="$7" -v ramp_target="${8:-}" -v ramp_span="${9:-0}" \
-    -v scale="$als_scale" -v offset="$offset" -v paused="$paused" \
+    -v scale="$als_scale" -v als_offset="$als_offset" -v offset="$offset" -v paused="$paused" \
     -v lux_alpha="$lux_ema_alpha" \
     -v up_threshold="$brighten_threshold" -v down_threshold="$darken_threshold" \
     -v up_debounce="$brighten_debounce" -v down_debounce="$darken_debounce" \
@@ -91,7 +97,7 @@ calculate() {
     }
     function clamp(v) { return v < 1 ? 1 : (v > 100 ? 100 : v) }
     BEGIN {
-      lux = raw * scale
+      lux = (raw + als_offset) * scale
       filtered = filtered == "" ? lux : filtered + lux_alpha * (lux - filtered)
 
       if (accepted == "") {
@@ -151,6 +157,60 @@ step_for() {
   awk -v rate="$1" -v w="$write_seconds" 'BEGIN { s = int(rate * w + 0.5); print s < 1 ? 1 : s }'
 }
 
+# Which output to drive, from `hyprctl monitors -j` on stdin: an Apple
+# display first (the same test omarchy-brightness-display routes on, so the
+# chosen output is the one writes reach), else the internal panel. A closed
+# lid disables the panel's output, which drops it here. Prints "name kind".
+pick_monitor() {
+  local name internal=""
+  while read -r name; do
+    [[ -n $name ]] || continue
+    if is_apple "$name"; then
+      printf '%s apple\n' "$name"
+      return 0
+    fi
+    [[ -z $internal && $name =~ ^(eDP|LVDS|DSI)- ]] && internal=$name
+  done < <(jq -r '.[] | select(.disabled != true) | .name' 2>/dev/null)
+  [[ -n $internal ]] || return 1
+  printf '%s panel\n' "$internal"
+}
+
+is_apple() { omarchy-hyprland-monitor-focused-apple "$1" 2>/dev/null; }
+
+detect_monitor() {
+  timeout 5 hyprctl monitors -j 2>/dev/null | pick_monitor
+}
+
+# The light sensor for a display kind. Prints "path scale offset".
+# Apple: the HID sensor hub under the display's USB device (vendor 05ac).
+# Panel: any other IIO illuminance sensor, with the kernel's own scale and
+# offset, or its processed reading when that is all it exposes.
+discover_sensor() {
+  local kind="$1" path resolved scale offset
+  for path in "$iio_root"/iio:device*; do
+    [[ -r $path/name ]] || continue
+    resolved=$(readlink -f "$path")
+    if [[ $kind == apple ]]; then
+      [[ $(<"$path/name") == als && -r $path/in_illuminance_raw && ${resolved,,} == *05ac:* ]] || continue
+      printf '%s %s 0\n' "$path/in_illuminance_raw" "$apple_als_scale"
+      return 0
+    fi
+    [[ ${resolved,,} == *05ac:* ]] && continue
+    if [[ -r $path/in_illuminance_raw ]]; then
+      scale=1 offset=0
+      [[ -r $path/in_illuminance_scale ]] && scale=$(<"$path/in_illuminance_scale")
+      [[ -r $path/in_illuminance_offset ]] && offset=$(<"$path/in_illuminance_offset")
+      printf '%s %s %s\n' "$path/in_illuminance_raw" "${scale:-1}" "${offset:-0}"
+      return 0
+    fi
+    if [[ -r $path/in_illuminance_input ]]; then
+      printf '%s 1 0\n' "$path/in_illuminance_input"
+      return 0
+    fi
+  done
+  return 1
+}
+
 if [[ ${1:-} == --self-test ]]; then
   fail() { echo "self-test: $*" >&2; exit 1; }
   run() {
@@ -207,38 +267,35 @@ if [[ ${1:-} == --self-test ]]; then
   write_seconds=0.08; [[ $(step_for 20) == 2 && $(step_for 13) == 1 ]] || fail "80 ms steps: $(step_for 20) $(step_for 13)"
   write_seconds=0.01; [[ $(step_for 20) == 1 && $(step_for 13) == 1 ]] || fail "10 ms steps should floor at 1"
   write_seconds=0.3;  [[ $(step_for 20) == 6 && $(step_for 13) == 4 ]] || fail "300 ms steps: $(step_for 20) $(step_for 13)"
+  # The sensor's kernel offset and scale apply before the curve.
+  als_offset=10; als_scale=0.5; offset=0; run 30 "" "" 0 0 0 ""
+  [[ $filtered == 20.0000000000 ]] || fail "(30 + 10) * 0.5 should be 20 lux, got $filtered"
+  als_offset=0; als_scale=1
+  # Display choice: Apple wins, else the panel; a disabled (lid shut) panel
+  # is no choice at all.
+  is_apple() { [[ $1 == DP-2 ]]; }
+  [[ $(pick_monitor <<<'[{"name":"eDP-1"},{"name":"DP-2"}]') == "DP-2 apple" ]] || fail "Apple display not preferred"
+  [[ $(pick_monitor <<<'[{"name":"eDP-1"},{"name":"DP-3"}]') == "eDP-1 panel" ]] || fail "panel not chosen without Apple"
+  [[ $(pick_monitor <<<'[{"name":"DP-2"},{"name":"eDP-1","disabled":true}]') == "DP-2 apple" ]] || fail "closed lid with Apple"
+  pick_monitor <<<'[{"name":"eDP-1","disabled":true},{"name":"DP-3"}]' >/dev/null && fail "closed lid without Apple should pick nothing"
+  # Sensors: the Apple one only under 05ac; the panel takes the other one,
+  # with the kernel's scale and offset, or a processed reading.
+  iio_root=$(mktemp -d); trap 'rm -rf "$iio_root"' EXIT
+  mkdir -p "$iio_root/usb-05ac:1114/dev0" "$iio_root/i2c-FRMW0005/dev1"
+  ln -s "$iio_root/usb-05ac:1114/dev0" "$iio_root/iio:device0"
+  ln -s "$iio_root/i2c-FRMW0005/dev1" "$iio_root/iio:device1"
+  echo als >"$iio_root/usb-05ac:1114/dev0/name"; echo 1 >"$iio_root/usb-05ac:1114/dev0/in_illuminance_raw"
+  echo als >"$iio_root/i2c-FRMW0005/dev1/name"; echo 1 >"$iio_root/i2c-FRMW0005/dev1/in_illuminance_raw"
+  echo 0.25 >"$iio_root/i2c-FRMW0005/dev1/in_illuminance_scale"; echo 2 >"$iio_root/i2c-FRMW0005/dev1/in_illuminance_offset"
+  [[ $(discover_sensor apple) == "$iio_root/iio:device0/in_illuminance_raw 0.001 0" ]] || fail "Apple sensor: $(discover_sensor apple)"
+  [[ $(discover_sensor panel) == "$iio_root/iio:device1/in_illuminance_raw 0.25 2" ]] || fail "panel sensor: $(discover_sensor panel)"
+  rm "$iio_root/i2c-FRMW0005/dev1/in_illuminance_raw"; echo 12.5 >"$iio_root/i2c-FRMW0005/dev1/in_illuminance_input"
+  [[ $(discover_sensor panel) == "$iio_root/iio:device1/in_illuminance_input 1 0" ]] || fail "processed sensor: $(discover_sensor panel)"
+  rm -r "$iio_root/i2c-FRMW0005" "$iio_root/iio:device1"
+  discover_sensor panel >/dev/null && fail "the Apple sensor must not stand in for the panel's"
   echo ok
   exit 0
 fi
-
-# The same test omarchy-brightness-display uses to route to asdcontrol, so
-# the output chosen here is the one the writes will reach.
-detect_monitor() {
-  local name
-  while read -r name; do
-    [[ -n $name ]] || continue
-    if omarchy-hyprland-monitor-focused-apple "$name" 2>/dev/null; then
-      printf '%s\n' "$name"
-      return 0
-    fi
-  done < <(timeout 5 hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.disabled != true) | .name')
-  return 1
-}
-
-# The display's ALS shows up as a HID sensor hub under the Apple USB device
-# (vendor 05ac), which keeps a laptop's own light sensor out of the picture.
-discover_sensor() {
-  local path resolved
-  for path in /sys/bus/iio/devices/iio:device*; do
-    [[ -r $path/name && -r $path/in_illuminance_raw ]] || continue
-    [[ $(<"$path/name") == als ]] || continue
-    resolved=$(readlink -f "$path")
-    [[ ${resolved,,} == *05ac:* ]] || continue
-    printf '%s\n' "$path/in_illuminance_raw"
-    return 0
-  done
-  return 1
-}
 
 # Read the display. Returns 0 when it is where we left it, 1 when someone
 # else moved it (now adopted), 2 when it could not be read.
@@ -258,14 +315,19 @@ sync_from_display() {
   return 1
 }
 
-# Writes go through the Apple script directly. The routing helper holds a
-# non-blocking lock and silently drops a write that collides with a hotkey,
-# in either direction: a ramp would lose its own steps, or drop the user's
-# presses. Without the lock both writes reach the display, and the read-back
-# before the next write adopts whichever landed last.
+# Writes bypass the routing helper, straight to the Apple script or the
+# backlight. The helper holds a non-blocking lock and silently drops a write
+# that collides with a hotkey, in either direction: a ramp would lose its own
+# steps, or drop the user's presses. Without the lock both writes reach the
+# display, and the read-back before the next write adopts whichever landed
+# last.
 write_display() {
   local started=$EPOCHREALTIME
-  timeout 10 omarchy-brightness-display-apple --no-osd "$1%" >/dev/null 2>&1 || return 1
+  if [[ $kind == apple ]]; then
+    timeout 10 omarchy-brightness-display-apple --no-osd "$1%" >/dev/null 2>&1 || return 1
+  else
+    timeout 10 brightnessctl -q -d "$backlight" set "$1%" >/dev/null 2>&1 || return 1
+  fi
   last_applied=$1
   write_seconds=$(awk -v a="$started" -v b="$EPOCHREALTIME" -v w="$write_seconds" 'BEGIN { printf "%.4f", w + 0.3 * ((b - a) - w) }')
 }
@@ -292,7 +354,10 @@ emit_status() {
 
 reset_state() {
   monitor=""
+  kind=""
+  backlight=""
   sensor=""
+  last_detect=0
   filtered_lux=""
   accepted_lux=""
   pending_dir=0
@@ -324,17 +389,35 @@ poll() {
   next_delay=$poll_interval
   read_this_poll=0
 
-  if [[ -z $monitor ]] && ! monitor=$(detect_monitor); then
-    emit_status false "No Apple display connected"
-    next_delay=$retry_interval
-    return
+  local chosen
+  if [[ -z $monitor ]] || (( SECONDS - last_detect >= manual_check_interval )); then
+    chosen=$(detect_monitor)
+    if [[ $chosen != "$monitor $kind" ]]; then
+      reset_state
+      if [[ -z $chosen ]]; then
+        emit_status false "No supported display connected"
+        next_delay=$retry_interval
+        return
+      fi
+      read -r monitor kind <<<"$chosen"
+      if [[ $kind == panel ]] && ! backlight=$(omarchy-hw-display); then
+        emit_status false "No backlight found for $monitor"
+        reset_state
+        next_delay=$retry_interval
+        return
+      fi
+    fi
+    last_detect=$SECONDS
   fi
-  if [[ -z $sensor ]] && ! sensor=$(discover_sensor); then
-    emit_status false "No Apple display light sensor found"
-    next_delay=$retry_interval
-    return
+  if [[ -z $sensor ]]; then
+    if ! read -r sensor als_scale als_offset < <(discover_sensor "$kind"); then
+      emit_status false "No light sensor found for $monitor"
+      reset_state
+      next_delay=$retry_interval
+      return
+    fi
   fi
-  if ! raw=$(<"$sensor") || [[ ! $raw =~ ^[0-9]+$ ]]; then
+  if ! raw=$(<"$sensor") || [[ ! $raw =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
     emit_status false "Could not read the ambient light sensor"
     reset_state
     next_delay=$retry_interval

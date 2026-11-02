@@ -4,8 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Auto brightness for Omarchy: a bar widget that reads an ambient light
-sensor and follows the room. Tuned on the Apple Studio Display, and built
-to take other displays; see [Other displays](#other-displays).
+sensor and follows the room. Drives the Apple Studio Display when it is
+connected, else the laptop's internal panel; see
+[Other displays](#other-displays).
 
 <img src="docs/demo.gif" alt="The panel open under the bar: a nudge on the slider becomes Auto +6, a jump becomes Auto -35, restore ramps back to the curve, and the chip switches to Manual and back" width="422">
 
@@ -19,10 +20,17 @@ to take other displays; see [Other displays](#other-displays).
 
 ## Requirements
 
+One of:
+
 - An Apple Studio Display with its USB side connected, so Hyprland reports
   make `Apple Computer Inc` and the light sensor appears under
-  `/sys/bus/iio`. The Pro Display XDR should work but is untested.
-- `asdcontrol` and its passwordless sudo rule. Omarchy installs both.
+  `/sys/bus/iio`. Needs `asdcontrol` and its passwordless sudo rule, which
+  Omarchy installs. The Pro Display XDR should work but is untested.
+- A laptop with an ambient light sensor under `/sys/bus/iio` and a
+  backlight `brightnessctl` can drive.
+
+With both, the Studio Display wins; the panel takes over when it is
+unplugged, within 10 s.
 
 ## Install
 
@@ -66,18 +74,22 @@ loop structure started from
 
 ## Other displays
 
-Four places pin the plugin to the Studio Display, and each is a small
-change:
+One display is driven at a time, each with its own sensor and write path:
 
-| What | Today | To generalise |
-|------|-------|---------------|
-| Display detection | The Apple test `omarchy-brightness-display` routes on | Accept the internal panel, or any output the helper can drive |
-| Writes | `omarchy-brightness-display-apple` directly, to sidestep the routing helper's lock | Route by display type, as reads already do |
-| Sensor discovery | IIO `als` device under the Apple USB path | Any IIO illuminance device, preferring one attached to the display |
-| Lux unit | Fixed 0.001, because the Apple sensor reports millilux while the kernel scale reads 1.0 | Per-sensor: Apple gets 0.001, everything else the kernel's `in_illuminance_scale` |
+| What | Studio Display | Laptop panel |
+|------|----------------|--------------|
+| Detection | The Apple test `omarchy-brightness-display` routes on | An enabled `eDP`, `LVDS` or `DSI` output; a closed lid disables it |
+| Writes | `omarchy-brightness-display-apple`, sidestepping the routing helper's lock | `brightnessctl` on `omarchy-hw-display`'s backlight |
+| Sensor | IIO `als` device under the Apple USB path | Any other IIO illuminance device |
+| Lux unit | Fixed 0.001: millilux, though the kernel scale reads 1.0 | The kernel's `in_illuminance_scale` and `in_illuminance_offset` |
 
-The curve is anchored in nits, so another panel needs its own anchors but
-not a new structure. Hysteresis, debounce, ramp and learning carry over
+Still missing: external monitors other than Apple's (DDC has no light
+sensor to pair with), and driving more than one display at once.
+
+Both displays share one curve and one offset. The curve is anchored in
+nits on the Studio Display, so a panel with another peak lands off it by
+a roughly constant amount, which the offset absorbs; a panel lived with
+for long could earn its own anchors without a new structure. Hysteresis, debounce, ramp and learning carry over
 unchanged; the ramp measures the display's write latency and steps as
 finely as that allows. Got a display with a light sensor? Open a PR, or
 an issue with what it exposes under `/sys/bus/iio` and in
@@ -88,6 +100,7 @@ this plugin will shrink to whatever the built-in version does not cover.
 
 ## Known limits
 
-- Hotkey changes are noticed within 10 s; each check is a `sudo asdcontrol`
-  call, which the journal logs.
-- Brightness only. The display has no colour temperature control over USB.
+- Hotkey changes are noticed within 10 s. On the Studio Display each check
+  is a `sudo asdcontrol` call, which the journal logs.
+- Brightness only. The Studio Display has no colour temperature control
+  over USB.
