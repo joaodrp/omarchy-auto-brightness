@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.4](https://github.com/joaodrp/omarchy-auto-brightness/compare/v0.1.3...v0.1.4) (2026-11-02)
+
+
+### Features
+
+* drive the laptop panel when no Studio Display is connected ([1459c83](https://github.com/joaodrp/omarchy-auto-brightness/commit/1459c830a2a80c8188d4021acf6d647229bd16ac))
+* fade smoothly on displays with fine brightness levels ([48c69ca](https://github.com/joaodrp/omarchy-auto-brightness/commit/48c69ca8bc30027a38d91f1bedecdb1f1802d4fd))
+
+
+### Bug Fixes
+
+* re-attach a display whose device stops reading ([190c257](https://github.com/joaodrp/omarchy-auto-brightness/commit/190c2578d1c60ea0e9aa1a0002aa17d4c23bf32f))
+* stop settings echoes from bouncing brightness ([2062fb3](https://github.com/joaodrp/omarchy-auto-brightness/commit/2062fb3b4b0bc6d25014085ff123b1043e1d3294))
+
 ## [0.1.3](https://github.com/joaodrp/omarchy-auto-brightness/compare/v0.1.2...v0.1.3) (2026-09-20)
 
 
