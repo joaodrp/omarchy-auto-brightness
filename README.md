@@ -108,3 +108,15 @@ this plugin will shrink to whatever the built-in version does not cover.
   is a `sudo asdcontrol` call, which the journal logs.
 - Brightness only. The Studio Display has no colour temperature control
   over USB.
+- With the lid closed the laptop panel is not driven: the Studio Display
+  takes over if connected, otherwise the widget hides.
+- Some laptop light sensors read 0 after a resume until their driver is
+  bound again. Rebinding brings them back:
+
+  ```sh
+  for dev in /sys/bus/platform/drivers/hid_sensor_als/HID-SENSOR-*; do
+    name=${dev##*/}
+    echo "$name" | sudo tee /sys/bus/platform/drivers/hid_sensor_als/unbind >/dev/null
+    echo "$name" | sudo tee /sys/bus/platform/drivers/hid_sensor_als/bind >/dev/null
+  done
+  ```

@@ -6,7 +6,7 @@ Everything this plugin touches on the machine, and how to undo it.
 |--------|-------|------|
 | Plugin symlink | `~/.config/omarchy/plugins/io.github.joaodrp.auto-brightness` -> this repo | `rm ~/.config/omarchy/plugins/io.github.joaodrp.auto-brightness` |
 | Bar entry with `auto` / `offset` keys | `~/.config/omarchy/shell.json` | `omarchy plugin disable io.github.joaodrp.auto-brightness` removes it |
-| Display brightness value | Studio Display hardware | Set it with the slider or the hotkeys; nothing persists |
+| Display brightness value | The active display: Studio Display hardware or the laptop backlight | Set it with the slider or the hotkeys; nothing persists |
 
 Full reset, in order:
 
