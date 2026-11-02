@@ -159,56 +159,72 @@ step_for() {
   awk -v rate="$1" -v w="$write_seconds" 'BEGIN { s = int(rate * w + 0.5); print s < 1 ? 1 : s }'
 }
 
-# Which output to drive, from `hyprctl monitors -j` on stdin: an Apple
-# display first (the same test omarchy-brightness-display routes on, so the
-# chosen output is the one writes reach), else the internal panel. A closed
-# lid disables the panel's output, which drops it here. Prints "name kind".
-pick_monitor() {
-  local name internal=""
-  while read -r name; do
-    [[ -n $name ]] || continue
-    if is_apple "$name"; then
-      printf '%s apple\n' "$name"
-      return 0
-    fi
-    [[ -z $internal && $name =~ ^(eDP|LVDS|DSI)- ]] && internal=$name
-  done < <(jq -r '.[] | select(.disabled != true) | .name' 2>/dev/null)
-  [[ -n $internal ]] || return 1
-  printf '%s panel\n' "$internal"
-}
+# Display profiles, in priority order: the first kind with a matching output
+# is driven. Supporting another display means adding a kind here. Each
+# defines:
+#   <kind>_match NAME     the Hyprland output NAME is this kind
+#   <kind>_attach         prepare writes to $monitor; fail if impossible
+#   <kind>_sensor DEV     DEV, an IIO device, is this display's light sensor;
+#                         print "file scale offset"
+#   <kind>_write PCT      set the display to PCT percent
+profiles="apple panel"
 
+# Apple: the same test omarchy-brightness-display routes on, so the output
+# chosen is the one writes reach. The sensor is the HID sensor hub under the
+# display's USB device (vendor 05ac). Writes go to the Apple script directly;
+# see write_display.
+apple_match() { is_apple "$1"; }
 is_apple() { omarchy-hyprland-monitor-focused-apple "$1" 2>/dev/null; }
+apple_attach() { :; }
+apple_sensor() {
+  [[ $(<"$1/name") == als && -r $1/in_illuminance_raw && $(readlink -f "$1") == *05[aA][cC]:* ]] || return 1
+  printf '%s %s 0\n' "$1/in_illuminance_raw" "$apple_als_scale"
+}
+apple_write() { timeout 10 omarchy-brightness-display-apple --no-osd "$1%" >/dev/null 2>&1; }
+
+# Panel: the laptop's internal output. A closed lid disables it, which drops
+# it from the outputs considered. The sensor is any IIO illuminance device
+# that is not the Studio Display's, with the kernel's own scale and offset,
+# or its processed reading when that is all it exposes.
+panel_match() { [[ $1 =~ ^(eDP|LVDS|DSI)- ]]; }
+panel_attach() { backlight=$(omarchy-hw-display); }
+panel_sensor() {
+  local scale=1 offset=0
+  [[ $(readlink -f "$1") == *05[aA][cC]:* ]] && return 1
+  if [[ -r $1/in_illuminance_raw ]]; then
+    [[ -r $1/in_illuminance_scale ]] && scale=$(<"$1/in_illuminance_scale")
+    [[ -r $1/in_illuminance_offset ]] && offset=$(<"$1/in_illuminance_offset")
+    printf '%s %s %s\n' "$1/in_illuminance_raw" "${scale:-1}" "${offset:-0}"
+  elif [[ -r $1/in_illuminance_input ]]; then
+    printf '%s 1 0\n' "$1/in_illuminance_input"
+  else
+    return 1
+  fi
+}
+panel_write() { timeout 10 brightnessctl -q -d "$backlight" set "$1%" >/dev/null 2>&1; }
+
+# Which output to drive, from `hyprctl monitors -j` on stdin. Prints
+# "name kind".
+pick_monitor() {
+  local outputs kind name
+  mapfile -t outputs < <(jq -r '.[] | select(.disabled != true) | .name' 2>/dev/null)
+  for kind in $profiles; do
+    for name in "${outputs[@]}"; do
+      [[ -n $name ]] && "${kind}_match" "$name" && { printf '%s %s\n' "$name" "$kind"; return 0; }
+    done
+  done
+  return 1
+}
 
 detect_monitor() {
   timeout 5 hyprctl monitors -j 2>/dev/null | pick_monitor
 }
 
-# The light sensor for a display kind. Prints "path scale offset".
-# Apple: the HID sensor hub under the display's USB device (vendor 05ac).
-# Panel: any other IIO illuminance sensor, with the kernel's own scale and
-# offset, or its processed reading when that is all it exposes.
+# The light sensor for a display kind. Prints "file scale offset".
 discover_sensor() {
-  local kind="$1" path resolved scale offset
-  for path in "$iio_root"/iio:device*; do
-    [[ -r $path/name ]] || continue
-    resolved=$(readlink -f "$path")
-    if [[ $kind == apple ]]; then
-      [[ $(<"$path/name") == als && -r $path/in_illuminance_raw && ${resolved,,} == *05ac:* ]] || continue
-      printf '%s %s 0\n' "$path/in_illuminance_raw" "$apple_als_scale"
-      return 0
-    fi
-    [[ ${resolved,,} == *05ac:* ]] && continue
-    if [[ -r $path/in_illuminance_raw ]]; then
-      scale=1 offset=0
-      [[ -r $path/in_illuminance_scale ]] && scale=$(<"$path/in_illuminance_scale")
-      [[ -r $path/in_illuminance_offset ]] && offset=$(<"$path/in_illuminance_offset")
-      printf '%s %s %s\n' "$path/in_illuminance_raw" "${scale:-1}" "${offset:-0}"
-      return 0
-    fi
-    if [[ -r $path/in_illuminance_input ]]; then
-      printf '%s 1 0\n' "$path/in_illuminance_input"
-      return 0
-    fi
+  local dev
+  for dev in "$iio_root"/iio:device*; do
+    [[ -r $dev/name ]] && "${1}_sensor" "$dev" && return 0
   done
   return 1
 }
@@ -347,19 +363,15 @@ sync_from_display() {
   return 1
 }
 
-# Writes bypass the routing helper, straight to the Apple script or the
-# backlight. The helper holds a non-blocking lock and silently drops a write
+# Writes bypass the routing helper, straight to the profile's own path. The
+# helper holds a non-blocking lock and silently drops a write
 # that collides with a hotkey, in either direction: a ramp would lose its own
 # steps, or drop the user's presses. Without the lock both writes reach the
 # display, and the read-back before the next write adopts whichever landed
 # last.
 write_display() {
   local started=$EPOCHREALTIME
-  if [[ $kind == apple ]]; then
-    timeout 10 omarchy-brightness-display-apple --no-osd "$1%" >/dev/null 2>&1 || return 1
-  else
-    timeout 10 brightnessctl -q -d "$backlight" set "$1%" >/dev/null 2>&1 || return 1
-  fi
+  "${kind}_write" "$1" || return 1
   last_applied=$1
   write_seconds=$(awk -v a="$started" -v b="$EPOCHREALTIME" -v w="$write_seconds" 'BEGIN { printf "%.4f", w + 0.3 * ((b - a) - w) }')
 }
@@ -419,8 +431,8 @@ poll() {
         return
       fi
       read -r monitor kind <<<"$chosen"
-      if [[ $kind == panel ]] && ! backlight=$(omarchy-hw-display); then
-        emit_status false "No backlight found for $monitor"
+      if ! "${kind}_attach"; then
+        emit_status false "Cannot drive $monitor"
         reset_state
         next_delay=$retry_interval
         return

@@ -74,7 +74,8 @@ loop structure started from
 
 ## Other displays
 
-One display is driven at a time, each with its own sensor and write path:
+One display is driven at a time. Each kind is a profile in `controller`,
+tried in priority order, with its own detection, sensor and write path:
 
 | What | Studio Display | Laptop panel |
 |------|----------------|--------------|
@@ -89,10 +90,13 @@ sensor to pair with), and driving more than one display at once.
 Both displays share one curve and one offset. The curve is anchored in
 nits on the Studio Display, so a panel with another peak lands off it by
 a roughly constant amount, which the offset absorbs; a panel lived with
-for long could earn its own anchors without a new structure. Hysteresis, debounce, ramp and learning carry over
-unchanged; the ramp measures the display's write latency and steps as
-finely as that allows. Got a display with a light sensor? Open a PR, or
-an issue with what it exposes under `/sys/bus/iio` and in
+for long could earn its own anchors without a new structure. Hysteresis,
+debounce, ramp and learning carry over unchanged; the ramp measures the
+display's write latency and steps as finely as that allows.
+
+Got another display with a light sensor? Add a profile: the comment above
+`profiles` in `controller` lists the functions one defines. Or open an
+issue with what it exposes under `/sys/bus/iio` and in
 `hyprctl monitors -j`.
 
 Omarchy has open pull requests for built-in auto brightness. If one lands,
