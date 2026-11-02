@@ -183,6 +183,13 @@ no justification and was removed.
 
 ## Open questions
 
+- Panel sensors are trusted to report lux at the kernel's scale; a cover
+  test would confirm it.
+- Whether the shared curve suits the laptop panel. It is anchored in the
+  Studio Display's nits; a panel with another peak is off by a roughly
+  constant amount, which the offset absorbs, so per-display anchors wait
+  until that proves wrong.
+
 - The nits mapping assumes Apple's 600 nit rating is the raw maximum. A
   light meter reading at two percentages would settle it.
 - The curve anchors between 200 and 5000 lux have not been lived with

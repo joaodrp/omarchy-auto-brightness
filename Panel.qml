@@ -4,10 +4,10 @@ import Quickshell.Io
 import qs.Ui
 import qs.Commons
 
-// Brightness for the Apple Studio Display: a slider, the Auto chip, and
-// the room's light.
-// The stock Display panel is untouched; this widget only shows while an
-// Apple display with a light sensor is connected.
+// Brightness for the active display, the Apple Studio Display or else the
+// laptop panel: a slider, the Auto chip, and the room's light.
+// The stock Display panel is untouched; this widget only shows while one of
+// them is available with a light sensor.
 Panel {
   id: root
   moduleName: "io.github.joaodrp.auto-brightness"
