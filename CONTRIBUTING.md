@@ -59,7 +59,7 @@ python3 .github/check-manifest.py  # manifest, README table and Service.qml read
 
 # QML lint needs an import dir holding a `qs` symlink to the shell
 mkdir -p /tmp/qslint && ln -sfn "$OMARCHY_PATH/shell" /tmp/qslint/qs
-/usr/lib/qt6/bin/qmllint -I /tmp/qslint Panel.qml Service.qml
+/usr/lib/qt6/bin/qmllint -I /tmp/qslint Panel.qml Service.qml DisplayChannel.qml
 ```
 
 Use the Qt 6 `qmllint` path above: the one on `PATH` is Qt 5 and fails on every
@@ -70,10 +70,10 @@ change rather than aiming for silence.
 The checks prove the maths and that the files parse. For the rest, watch it:
 
 ```sh
-omarchy-shell auto-brightness status          # lux, target, brightness, offset
-omarchy-brightness-display --monitor DP-3 40%  # a "hotkey" change; becomes the offset within 10 s
-omarchy-brightness-display --monitor eDP-1 40% # the same on the laptop panel
-omarchy-shell auto-brightness disable          # Manual
+omarchy-shell auto-brightness status            # every display: lux, target, brightness, preference
+omarchy-brightness-display --monitor DP-1 40%    # a "hotkey" change; becomes DP-1's preference at its next read-back
+omarchy-brightness-display --monitor eDP-1 40%   # the same on the laptop panel
+omarchy-shell auto-brightness toggleFor eDP-1    # Manual on that display only
 ```
 
 CI runs the unit tests and the manifest check. `omarchy plugin validate` and the
