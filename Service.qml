@@ -25,8 +25,8 @@ Item {
   property var lastProbe: null
   property bool tearingDown: false
 
-  // The display the single panel shows: the Studio Display when it can be
-  // driven, else the laptop panel, else the first other.
+  // The display IPC commands without a monitor act on: the Studio Display
+  // when connected, else the laptop panel, else the first other.
   readonly property var primary: {
     var list = channelList
     var order = ["apple", "panel", "ddc"]
@@ -36,7 +36,7 @@ Item {
     return null
   }
 
-  // What the panel binds to: the primary display's.
+  // The primary display's, for status.
   readonly property bool hardwareAvailable: primary !== null && primary.hasSensor
   readonly property bool enabled: primary ? primary.auto : (settings ? settings.held.auto : true)
   readonly property int offset: primary ? Math.round(primary.preference) : 0
@@ -127,19 +127,31 @@ Item {
     change(patch)
   }
 
-  // Panel actions, on the primary display.
-  function setEnabled(value) { if (primary) change(displayPatch(primary.displayId, { auto: value === true })) }
-  function clearOffset() {
-    if (!primary) return
-    primary.rebaseline()
-    change(preferencePatch(primary, null))
+  // The display on output `name`, as a bar on that output shows it.
+  function channelOn(name) {
+    var list = channelList
+    for (var i = 0; i < list.length; i++) if (list[i].name === name) return list[i]
+    return null
   }
-  function setBrightness(percent) {
+
+  // Actions on one display: the panel's own, or IPC's.
+  function setEnabledFor(ch, value) { if (ch) change(displayPatch(ch.displayId, { auto: value === true })) }
+  function clearOffsetFor(ch) {
+    if (!ch) return
+    ch.rebaseline()
+    change(preferencePatch(ch, null))
+  }
+  function setBrightnessFor(ch, percent) {
     var p = Number(percent)
-    if (!primary || !isFinite(p)) return false
-    primary.setBrightness(p)
+    // An inactive display would drop the write when it wakes.
+    if (!ch || !ch.active || !isFinite(p)) return false
+    ch.setBrightness(p)
     return true
   }
+
+  function setEnabled(value) { setEnabledFor(primary, value) }
+  function clearOffset() { clearOffsetFor(primary) }
+  function setBrightness(percent) { return setBrightnessFor(primary, percent) }
 
   // Inventory ----------------------------------------------------------------
 
@@ -376,7 +388,24 @@ Item {
     }
     function forget(): string { root.clearOffset(); return "forgot" }
     function set(percent: string): string {
-      return root.setBrightness(percent) ? "set " + Math.round(Number(percent)) : "not set: no display, or not a number"
+      return root.setBrightness(percent) ? "set " + Math.round(Number(percent)) : "not set: no active display, or not a number"
+    }
+    // The same, on the display on output `monitor`, e.g. eDP-1.
+    function setFor(monitor: string, percent: string): string {
+      return root.setBrightnessFor(root.channelOn(monitor), percent) ? "set " + Math.round(Number(percent)) : "not set: no such active display, or not a number"
+    }
+    function forgetFor(monitor: string): string {
+      var ch = root.channelOn(monitor)
+      if (!ch) return "no such display"
+      root.clearOffsetFor(ch)
+      return "forgot"
+    }
+    function toggleFor(monitor: string): string {
+      var ch = root.channelOn(monitor)
+      if (!ch) return "no such display"
+      var next = !ch.auto
+      root.setEnabledFor(ch, next)
+      return next ? "enabled" : "disabled"
     }
   }
 

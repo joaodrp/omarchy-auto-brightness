@@ -1,24 +1,29 @@
 import QtQuick
 import QtQuick.Controls
-import Quickshell.Io
+import Quickshell
 import qs.Ui
 import qs.Commons
 
-// Brightness for the active display, the Apple Studio Display or else the
-// laptop panel: a slider, the Auto chip, and the room's light.
-// The stock Display panel is untouched; this widget only shows while one of
-// them is available with a light sensor.
+// Brightness for the display this bar is on: a slider, the Auto chip, and
+// the room's light. A display without a light sensor is manual only.
+// The stock Display panel is untouched; this widget only shows on a display
+// the service drives.
 Panel {
   id: root
   moduleName: "io.github.joaodrp.auto-brightness"
   ipcTarget: "io.github.joaodrp.auto-brightness"
 
   property var service: null
-  readonly property bool available: service?.hardwareAvailable ?? false
-  readonly property bool autoEnabled: service?.enabled ?? false
-  readonly property int offset: service?.offset ?? 0
-  readonly property int lux: Math.round(service?.lux ?? 0)
-  readonly property bool canRestore: autoEnabled && (service?.hasPreference ?? false)
+  readonly property string screenName: root.QsWindow.window?.screen?.name ?? ""
+  // This bar's display, a DisplayChannel, or null.
+  readonly property var display: service && screenName ? service.channelOn(screenName) : null
+  readonly property bool available: display?.active ?? false
+  readonly property bool hasSensor: display?.hasSensor ?? false
+  readonly property bool autoEnabled: hasSensor && (display?.auto ?? false)
+  readonly property int offset: Math.round(display?.preference ?? 0)
+  readonly property int lux: Math.round(display?.lux ?? 0)
+  readonly property string error: display ? (display.error || display.sensorError) : ""
+  readonly property bool canRestore: autoEnabled && (display?.preference ?? 0) !== 0
   readonly property string icon: autoEnabled ? "󰃟" : "󰃠"
 
   // The slider follows the display, except while the pointer drags it.
@@ -42,7 +47,7 @@ Panel {
 
   function setBrightness(value) {
     root.brightnessPercent = Util.clamp(Math.round(Number(value)), 1, 100)
-    if (service) service.setBrightness(root.brightnessPercent)
+    if (service && display) service.setBrightnessFor(display, root.brightnessPercent)
   }
 
   function previewBrightness(value) {
@@ -61,28 +66,45 @@ Panel {
   }
 
   function moveCursor(delta) {
-    selectedIndex = Util.clamp(selectedIndex + delta, -1, canRestore ? 1 : 0)
+    selectedIndex = Util.clamp(selectedIndex + delta, -1, canRestore ? 1 : hasSensor ? 0 : -1)
   }
 
   function activateCursor() {
-    if (!service) return
-    if (selectedIndex === 0) service.setEnabled(!autoEnabled)
-    else if (selectedIndex === 1) service.clearOffset()
+    if (!service || !display) return
+    if (selectedIndex === 0 && hasSensor) service.setEnabledFor(display, !autoEnabled)
+    else if (selectedIndex === 1 && canRestore) service.clearOffsetFor(display)
   }
 
   onOpenedChanged: {
     if (opened) {
       bindService()
+      // Summoned on a monitor whose display this widget does not drive.
+      if (!available) { close(); return }
       selectedIndex = -1
       cursorActive = false
     }
   }
 
+  // Another display, or none: a value meant for the old one is dropped.
+  onDisplayChanged: {
+    brightnessDebounce.stop()
+    if (!root.display) { if (root.opened) root.close(); return }
+    if (root.display.brightness > 0) root.brightnessPercent = root.display.brightness
+  }
+  onAvailableChanged: {
+    if (root.available) return
+    brightnessDebounce.stop()
+    if (root.opened) root.close()
+  }
+  // A control that disappears takes the cursor with it.
+  onCanRestoreChanged: moveCursor(0)
+  onHasSensorChanged: moveCursor(0)
+
   Connections {
-    target: root.service
+    target: root.display
     function onBrightnessChanged() {
-      if (!brightnessSlider.dragging && root.service.brightness > 0)
-        root.brightnessPercent = root.service.brightness
+      if (!brightnessSlider.dragging && root.display.brightness > 0)
+        root.brightnessPercent = root.display.brightness
     }
   }
 
@@ -144,7 +166,7 @@ Panel {
         PanelHero {
           width: parent.width
           title: "Brightness"
-          meta: !root.service ? "Starting" : (root.service.error || root.lux + " lux")
+          meta: !root.display ? "Starting" : (root.error || (root.hasSensor ? root.lux + " lux" : "No light sensor"))
           foreground: root.bar.foreground
           fontFamily: root.bar.fontFamily
           iconComponent: Component {
@@ -170,10 +192,11 @@ Panel {
                 hasCursor: root.cursorActive && root.selectedIndex === 1
                 anchors.verticalCenter: parent.verticalCenter
                 onHovered: function(on) { if (on) root.focusCursor(1) }
-                onClicked: root.service.clearOffset()
+                onClicked: root.service.clearOffsetFor(root.display)
               }
 
               Button {
+                visible: root.hasSensor
                 text: root.chipText()
                 tooltipText: root.autoEnabled ? "Switch to manual" : "Follow the room's light"
                 selected: root.autoEnabled
@@ -183,7 +206,7 @@ Panel {
                 hasCursor: root.cursorActive && root.selectedIndex === 0
                 anchors.verticalCenter: parent.verticalCenter
                 onHovered: function(on) { if (on) root.focusCursor(0) }
-                onClicked: root.service.setEnabled(!root.autoEnabled)
+                onClicked: root.service.setEnabledFor(root.display, !root.autoEnabled)
               }
             }
           }
