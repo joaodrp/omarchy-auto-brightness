@@ -64,8 +64,16 @@ Item {
       offset = next.offset
       return
     }
-    apply(Settings.configEvent(settings, next))
+    var result = Settings.configEvent(settings, next)
+    apply(result)
+    // The shell announces a config before saving it, so a save from inside
+    // the announcement would land first and be overwritten by the one in
+    // progress. Write it back once that one is issued, as held by then: an
+    // action in between may have changed it.
+    if (result.restore) Qt.callLater(restoreHeld)
   }
+
+  function restoreHeld() { change({}, false) }
 
   // A change of ours. `tell` is false when the controller made it.
   function change(values, tell) {

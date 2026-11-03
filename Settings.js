@@ -6,15 +6,19 @@
 // is only where they are kept. The shell reports the config back many times
 // per write, the old value first, and the new one only after a file round
 // trip that can take seconds. So a config event is acted on only when it is
-// neither a repeat nor the echo of a write of ours.
+// neither a repeat nor the echo of a write of ours, and then only for the
+// fields it changed.
 //
-// state: { held, seen, pending }
+// state: { held, seen, pending, stale }
 //   held     the settings in force, sent to the controller
 //   seen     the last config event
-//   pending  our writes the config has not yet reported, oldest first. Not
-//            capped: the latest write always echoes, and that echo retires
-//            every older one, while dropping one would let its late echo
-//            pass as a change made elsewhere.
+//   pending  our writes since then the config has not yet reported, oldest
+//            first; the latest is the shell's copy. Not capped: the latest
+//            write always echoes, and that echo retires every older one,
+//            while dropping one would let its late echo pass as a change
+//            made elsewhere.
+//   stale    our writes a change made elsewhere overtook. A late echo of one
+//            is still ignored, but none is the shell's copy any more.
 
 // The persisted settings in a shell.json bar entry, with their defaults.
 function read(config) {
@@ -38,18 +42,38 @@ function diff(from, to) {
 // A fresh controller: send it everything. After a restart the held state
 // stands, since the config may still lag our writes.
 function start(config, previous) {
-  var state = previous || { held: config, seen: config, pending: [] }
+  var state = previous || { held: config, seen: config, pending: [], stale: [] }
   return { state: state, lines: diff(null, state.held) }
 }
 
-// A config event. Returns the new state and the lines to send.
+// A config event. Returns the new state, the lines to send, and `restore`
+// when the config lost a setting of ours. The caller then writes the held
+// settings back through `own`, which records the write when it is made.
 function configEvent(state, next) {
   if (same(state.seen, next)) return { state: state, lines: [] }
+  // Echoes come in write order, so one matches the oldest write it equals,
+  // and every write older than that has been reported or never will be.
+  var stale = state.stale || []
+  for (var j = 0; j < stale.length; j++) {
+    if (same(stale[j], next))
+      return { state: { held: state.held, seen: next, pending: state.pending, stale: stale.slice(j + 1) }, lines: [] }
+  }
   for (var i = 0; i < state.pending.length; i++) {
     if (same(state.pending[i], next))
-      return { state: { held: state.held, seen: next, pending: state.pending.slice(i + 1) }, lines: [] }
+      return { state: { held: state.held, seen: next, pending: state.pending.slice(i + 1), stale: [] }, lines: [] }
   }
-  return { state: { held: next, seen: next, pending: state.pending }, lines: diff(state.held, next) }
+  // A change made elsewhere, from a config that may predate our pending
+  // writes. Only the fields it changed are its own; the rest keep what we hold.
+  var held = {
+    auto: next.auto !== state.seen.auto ? next.auto : state.held.auto,
+    offset: next.offset !== state.seen.offset ? next.offset : state.held.offset
+  }
+  var result = {
+    state: { held: held, seen: next, pending: [], stale: stale.concat(state.pending) },
+    lines: diff(state.held, held)
+  }
+  if (!same(held, next)) result.restore = true
+  return result
 }
 
 // A change of ours: a toggle, a reset, or an offset the controller learned.
@@ -63,7 +87,7 @@ function own(state, values) {
   // equal to it is no write, so no echo will come to retire it.
   var latest = state.pending.length ? state.pending[state.pending.length - 1] : state.seen
   var pending = same(held, latest) ? state.pending : state.pending.concat([held])
-  return { state: { held: held, seen: state.seen, pending: pending }, lines: diff(state.held, held), persist: held }
+  return { state: { held: held, seen: state.seen, pending: pending, stale: state.stale || [] }, lines: diff(state.held, held), persist: held }
 }
 
 // The offset a status line teaches, or null. Lines written before the
