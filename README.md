@@ -45,15 +45,19 @@ Setup > Plugins:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `auto` | `true` | Follow the room. The chip toggles it. |
-| `offset` | `0` | Your correction to the curve, in brightness points. Manual changes rewrite it; restore clears it. |
+| `auto` | `true` | Follow the room, on a display seen for the first time. Each display then keeps its own. |
+
+Each display's own Auto and preference (your correction to the curve, as a
+percentage of its brightness) are kept under `displays`, keyed by the
+display's make, model and serial. The chip and the slider set them; restore
+clears the preference.
 
 IPC:
 
 ```sh
 omarchy-shell auto-brightness status
 omarchy-shell auto-brightness toggle   # also enable / disable
-omarchy-shell auto-brightness forget   # clear the offset
+omarchy-shell auto-brightness forget   # clear the preference
 omarchy-shell auto-brightness set 40   # as if you moved the slider
 ```
 

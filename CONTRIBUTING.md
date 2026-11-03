@@ -11,9 +11,10 @@ model, how it is connected, what `hyprctl monitors -j` reports for `make` and
 | File | |
 | --- | --- |
 | `manifest.json` | Plugin contract: kinds, entry points, settings schema and defaults |
-| `controller` | The auto brightness loop. Bash, no dependencies beyond what Omarchy ships |
-| `Service.qml` | Runs the controller, persists settings, forwards manual changes, IPC |
-| `Settings.js` | What the service sends the controller and persists, apart from the shell's config echoes. Qt-free |
+| `Service.qml` | Runs the probe, samples the sensors, keeps one `DisplayChannel` per display, persists settings, IPC |
+| `DisplayChannel.qml` | One display: its hardware operations, ramp and learning |
+| `probe` | Prints the outputs, sensors, lid, EDIDs and backlight the inventory works from. Bash, no dependencies beyond what Omarchy ships |
+| `Settings.js` | Per-display settings and what the service persists, apart from the shell's config echoes. Qt-free |
 | `test/settings.test.js` | Unit tests for `Settings.js`, run under node |
 | `Control.js` | The control pipeline as pure functions: smoothing, hysteresis, debounce, the curve in nits, ramp and learning. Qt-free |
 | `test/control.test.js` | Unit tests for `Control.js`, run under node |
@@ -22,7 +23,7 @@ model, how it is connected, what `hyprctl monitors -j` reports for `make` and
 | `Endpoint.js` | Scheduling for one display's brightness writes and read-backs: one at a time, latest wins, backoff, per-kind policy. Qt-free |
 | `test/endpoint.test.js` | Unit tests for `Endpoint.js`, run under node |
 | `Panel.qml` | The bar icon and the panel |
-| `docs/design.md` | Why each stage of the controller is the way it is, with sources |
+| `docs/design.md` | Why each stage of the control pipeline is the way it is, with sources |
 | `preview.png` | The listing image the [plugin marketplace](https://plugins.omarchy.org/publish.html) reads from the repository root |
 | `docs/preview.html`, `docs/panel.png` | The source of `preview.png` and the demo frame it insets; see [Screenshots](#screenshots) |
 | `docs/demo.gif`, `docs/demo.mp4` | The README hero and the shareable clip; see [Screenshots](#screenshots) |
@@ -49,7 +50,6 @@ qs log -p "$OMARCHY_PATH/shell" --tail 60   # QML errors land here, and only wit
 ## Checks
 
 ```sh
-./controller --self-test           # curve, hysteresis, debounce, ramp, offset
 node test/settings.test.js         # what the service sends and persists
 node test/control.test.js          # the control pipeline in JS
 node test/inventory.test.js        # displays, sensors, identity, EDID luminance
@@ -76,15 +76,15 @@ omarchy-brightness-display --monitor eDP-1 40% # the same on the laptop panel
 omarchy-shell auto-brightness disable          # Manual
 ```
 
-CI runs the self-test, the settings tests and the manifest check. `omarchy plugin validate` and the
+CI runs the unit tests and the manifest check. `omarchy plugin validate` and the
 linter need Omarchy and Quickshell on the machine, so run those two yourself.
 
-## Changing the controller
+## Changing the control pipeline
 
-Every constant at the top of `controller` has a reason in
-[docs/design.md](docs/design.md). Change the constant and the reason in the
-same commit, and add a source if the reason is new. A change to the curve,
-the thresholds or the ramp should extend `--self-test`.
+Every constant in `Control.js` and every policy in `Endpoint.js` has a reason
+in [docs/design.md](docs/design.md). Change the constant and the reason in
+the same commit, and add a source if the reason is new. A change to the
+curve, the thresholds or the ramp should extend `test/control.test.js`.
 
 ## Screenshots
 
@@ -159,7 +159,7 @@ They describe the current state, never the change; git history holds that.
   visible is untested.
 - **The shell echoes every config write about 24 times, old value first.**
   The new value arrives only after a file round trip that can take seconds.
-  Never push config state to the controller; `Settings.js` acts only on
+  Never act on config state directly; `Settings.js` acts only on
   changes that are neither repeats nor echoes of the service's own writes.
 - **A laptop light sensor can read 0 after a resume** until its driver is
   bound again; see the README's known limits. A flat 0 in a lit room is
@@ -186,7 +186,7 @@ the patch, a `!` or `BREAKING CHANGE` footer the major.
 
 ## Scope
 
-One display today, by necessity rather than design: see the README's
-"Other displays" for what generalising takes. Colour temperature is out of
+Every display Omarchy can drive: the Studio Display, the laptop panel, and
+DDC/CI monitors, each with its own settings. Colour temperature is out of
 scope; the display exposes no control for it, and Night Light already owns
 `hyprsunset`.

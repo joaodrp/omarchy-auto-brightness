@@ -186,6 +186,15 @@ test("a data block running past its collection is not read", () => {
   assert.equal(inv.edidLuminance(edid(ext)), null)
 })
 
+test("lux applies the kernel's scale and offset, and the Studio's millilux", () => {
+  assert.equal(inv.lux({ ...chassisAls, scale: 0.5, offset: 10 }, "30\n"), 20)
+  assert.equal(inv.lux({ ...chassisAls }, "12.5"), 12.5)
+  // The Studio's kernel scale reads 1.0, but its raw value is millilux.
+  assert.equal(inv.lux({ ...studioAls, scale: 1, offset: 0 }, "10000"), 10)
+  assert.equal(inv.lux(chassisAls, "garbage"), null)
+  assert.equal(inv.lux(chassisAls, ""), null)
+})
+
 test("the lid reads open, closed, or unknown", () => {
   assert.equal(inv.lidState("state:      open\n"), "open")
   assert.equal(inv.lidState("state:      closed\n"), "closed")
