@@ -32,6 +32,9 @@ jobs:
       - name: Inventory unit tests
         run: node test/inventory.test.js
 
+      - name: Endpoint unit tests
+        run: node test/endpoint.test.js
+
       - name: Manifest matches the repo and the README
         run: python3 .github/check-manifest.py
 
