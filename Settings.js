@@ -6,7 +6,8 @@
 // is only where they are kept. The shell reports the config back many times
 // per write, the old value first, and the new one only after a file round
 // trip that can take seconds. So a config event is acted on only when it is
-// neither a repeat nor the echo of a write of ours.
+// neither a repeat nor the echo of a write of ours, and then only for the
+// fields it changed.
 //
 // state: { held, seen, pending }
 //   held     the settings in force, sent to the controller
@@ -42,14 +43,23 @@ function start(config, previous) {
   return { state: state, lines: diff(null, state.held) }
 }
 
-// A config event. Returns the new state and the lines to send.
+// A config event. Returns the new state, the lines to send, and, when the
+// config lost a setting of ours, the settings to persist again.
 function configEvent(state, next) {
   if (same(state.seen, next)) return { state: state, lines: [] }
   for (var i = 0; i < state.pending.length; i++) {
     if (same(state.pending[i], next))
       return { state: { held: state.held, seen: next, pending: state.pending.slice(i + 1) }, lines: [] }
   }
-  return { state: { held: next, seen: next, pending: state.pending }, lines: diff(state.held, next) }
+  // A change made elsewhere, from a config that may predate our pending
+  // writes. Only the fields it changed are its own; the rest keep what we hold.
+  var held = {
+    auto: next.auto !== state.seen.auto ? next.auto : state.held.auto,
+    offset: next.offset !== state.seen.offset ? next.offset : state.held.offset
+  }
+  var observed = { held: state.held, seen: next, pending: state.pending }
+  if (!same(held, next)) return own(observed, held)
+  return { state: { held: held, seen: next, pending: state.pending }, lines: diff(state.held, held) }
 }
 
 // A change of ours: a toggle, a reset, or an offset the controller learned.

@@ -78,6 +78,32 @@ test("a change made elsewhere is adopted and sent", () => {
   assert.deepEqual(plain(r.state.held), cfg(false, 9))
 })
 
+test("a change made elsewhere keeps a learned offset it did not touch", () => {
+  // The controller learns +13; before its echo, Setup turns auto off from a
+  // config that still reads offset 0. Only auto changed there.
+  let st = s.start(cfg(true, 0)).state
+  st = s.own(st, { offset: 13 }).state
+  const r = s.configEvent(st, cfg(false, 0))
+  assert.deepEqual(plain(r.lines), ["auto off"])
+  assert.deepEqual(plain(r.state.held), cfg(false, 13))
+  // The config lost the offset, so it is written back.
+  assert.deepEqual(plain(r.persist), cfg(false, 13))
+  // The late echo of the learned write, then of the write-back, change nothing.
+  const after = events(r.state, [cfg(true, 13), cfg(false, 13)])
+  assert.deepEqual(after.sent, [])
+  assert.deepEqual(plain(after.state.held), cfg(false, 13))
+  assert.equal(after.state.pending.length, 0)
+})
+
+test("a field changed elsewhere wins over a pending write to it", () => {
+  let st = s.start(cfg(true, 0)).state
+  st = s.own(st, { offset: 13 }).state
+  const r = s.configEvent(st, cfg(true, 5))
+  assert.deepEqual(plain(r.lines), ["offset 5"])
+  assert.deepEqual(plain(r.state.held), cfg(true, 5))
+  assert.equal(r.persist, undefined)
+})
+
 test("an action that changes nothing leaves no pending echo", () => {
   // The config already reads offset 0, so `forget` writes nothing and no
   // echo will come. A later change elsewhere to 5 and back to 0 is real.
