@@ -55,8 +55,6 @@ Item {
     enabled = settings.held.auto
     offset = settings.held.offset
     for (var i = 0; i < result.lines.length; i++) send(result.lines[i])
-    if (result.persist)
-      shell.updateEntryInline(manifest.id, Object.assign({}, configEntry(), result.persist, { id: manifest.id }))
   }
 
   function syncSettings() {
@@ -66,8 +64,16 @@ Item {
       offset = next.offset
       return
     }
-    apply(Settings.configEvent(settings, next))
+    var result = Settings.configEvent(settings, next)
+    apply(result)
+    // The shell announces a config before saving it, so a save from inside
+    // the announcement would land first and be overwritten by the one in
+    // progress. Write it back once that one is issued, as held by then: an
+    // action in between may have changed it.
+    if (result.restore) Qt.callLater(restoreHeld)
   }
+
+  function restoreHeld() { change({}, false) }
 
   // A change of ours. `tell` is false when the controller made it.
   function change(values, tell) {
@@ -75,6 +81,7 @@ Item {
     var result = Settings.own(settings || Settings.start(Settings.read(configEntry())).state, values)
     if (!tell) result.lines = []
     apply(result)
+    shell.updateEntryInline(manifest.id, Object.assign({}, configEntry(), result.persist, { id: manifest.id }))
   }
 
   function setEnabled(value) { change({ auto: value === true }, true) }

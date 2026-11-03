@@ -86,13 +86,46 @@ test("a change made elsewhere keeps a learned offset it did not touch", () => {
   const r = s.configEvent(st, cfg(false, 0))
   assert.deepEqual(plain(r.lines), ["auto off"])
   assert.deepEqual(plain(r.state.held), cfg(false, 13))
-  // The config lost the offset, so it is written back.
-  assert.deepEqual(plain(r.persist), cfg(false, 13))
+  // The config lost the offset, so it is written back, as held, later.
+  assert.equal(r.restore, true)
+  const back = s.own(r.state, {})
+  assert.deepEqual(plain(back.persist), cfg(false, 13))
+  assert.deepEqual(plain(back.lines), [])
   // The late echo of the learned write, then of the write-back, change nothing.
-  const after = events(r.state, [cfg(true, 13), cfg(false, 13)])
+  const after = events(back.state, [cfg(true, 13), cfg(false, 13)])
   assert.deepEqual(after.sent, [])
   assert.deepEqual(plain(after.state.held), cfg(false, 13))
   assert.equal(after.state.pending.length, 0)
+})
+
+test("a write-back superseded before it is made leaves no false echo", () => {
+  // The write-back of (off, 13) is due, but Setup sets offset 5 first, so
+  // the write-back finds nothing to write. Later real edits must all land.
+  let st = s.start(cfg(true, 0)).state
+  st = s.own(st, { offset: 13 }).state
+  let r = s.configEvent(st, cfg(false, 0))
+  r = s.configEvent(r.state, cfg(false, 5))
+  assert.deepEqual(plain(r.lines), ["offset 5"])
+  const back = s.own(r.state, {})
+  assert.deepEqual(plain(back.persist), cfg(false, 5))
+  // Nothing changed, so nothing is written and no echo is awaited.
+  assert.equal(back.state.pending.length, 0)
+  const after = events(back.state, [cfg(false, 5), cfg(false, 13), cfg(false, 5)])
+  assert.deepEqual(after.sent, ["offset 13", "offset 5"])
+})
+
+test("echoes match the oldest write they equal, overtaken or not", () => {
+  // Learn 13, Setup turns auto off, the write-back lands, then the user turns
+  // auto on: (on, 13) is both an overtaken write and the latest one. Their
+  // echoes arrive in write order and none is a change made elsewhere.
+  let st = s.start(cfg(true, 0)).state
+  st = s.own(st, { offset: 13 }).state
+  st = s.configEvent(st, cfg(false, 0)).state
+  st = s.own(st, {}).state
+  st = s.own(st, { auto: true }).state
+  const after = events(st, [cfg(true, 13), cfg(false, 13), cfg(true, 13)])
+  assert.deepEqual(after.sent, [])
+  assert.deepEqual(plain(after.state.held), cfg(true, 13))
 })
 
 test("a field changed elsewhere wins over a pending write to it", () => {
@@ -101,7 +134,7 @@ test("a field changed elsewhere wins over a pending write to it", () => {
   const r = s.configEvent(st, cfg(true, 5))
   assert.deepEqual(plain(r.lines), ["offset 5"])
   assert.deepEqual(plain(r.state.held), cfg(true, 5))
-  assert.equal(r.persist, undefined)
+  assert.equal(r.restore, undefined)
 })
 
 test("an action that changes nothing leaves no pending echo", () => {
