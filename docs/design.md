@@ -1,4 +1,4 @@
-# Why the controller works the way it does
+# Why auto brightness works the way it does
 
 Evidence behind each stage of the auto brightness procedure, collected so
 the design can be argued for upstream. Where a choice rests on a
@@ -6,7 +6,7 @@ measurement made on one display or on taste, that is said.
 
 ## Summary
 
-The controller follows the shape that Android documents in source and
+It follows the shape that Android documents in source and
 that macOS shows in use: filter the sensor, accept a new light level only
 past a hysteresis band and after a debounce, map lux to luminance on a
 log-shaped curve, ramp to it, and treat a manual change as a correction to
@@ -18,15 +18,18 @@ the user touches the keys.
 
 - **Transitions are as smooth as the hardware allows.** A fade writes as
   often as the display takes writes, up to 60 a second, in the display's
-  own units. Nothing about the fade is tuned per display: the controller
-  measures its write latency and reads the display's resolution from its
-  profile, so a faster, finer display gets a smoother fade for free and a
+  own units. Nothing about the fade is tuned per display: each display's
+  write latency is measured and its resolution read from its backlight's
+  range, so a faster, finer display gets a smoother fade for free and a
   slower link gets coarser steps without stalling.
 - **The user's hand always wins, and lands at once.** A manual change is
   written in one step, adopted, never fought, and becomes the standing
   correction. Only the room's changes are ramped.
 - **Stability comes from hysteresis and debounce, not from a slow ramp.**
   The ramp only hides the transition.
+- **Every display is its own.** Each has its own target, fade, read-backs
+  and learned preference; displays sharing a sensor share only its
+  smoothed reading.
 
 ## Measured on the hardware
 
@@ -80,12 +83,23 @@ noise.
 
 ### 4. Curve
 
-Lux to brightness percent, linear in log2(lux) between anchors:
+Lux to luminance in nits, linear in log2(lux + 1) between anchors:
 
 | Lux | 0 | 5 | 20 | 50 | 100 | 200 | 400 | 800 | 1500 | 3000 | 5000 |
 |-----|---|---|----|----|-----|-----|-----|-----|------|------|------|
-| %   | 5 | 9 | 14 | 19 | 24  | 30  | 38  | 48  | 60   | 80   | 100  |
-| nits, approx | 30 | 54 | 84 | 114 | 144 | 180 | 228 | 288 | 360 | 480 | 600 |
+| nits | 30 | 54 | 84 | 114 | 144 | 180 | 228 | 288 | 360 | 480 | 600 |
+| % on a 600-nit display | 5 | 9 | 14 | 19 | 24 | 30 | 38 | 48 | 60 | 80 | 100 |
+
+A display's percent is taken as linear in nits between its floor at 0% and
+its peak at 100%. Both come from the EDID's CTA-861 HDR Static Metadata,
+in a CTA extension or a DisplayID one, when it gives them; otherwise the
+display is assumed to be 600 nits, the Studio Display's rating. The curve
+is in nits rather than percent so that displays of different peaks
+land on the same luminance in the same room: a 300-nit monitor gets
+twice the percent a 600-nit one does, not the same percent and half the
+light. Most SDR monitors and laptop panels carry no such metadata, so for
+them the curve is the Studio Display's in percent, and the learned
+preference (stage 6) absorbs the difference.
 
 Why log-shaped: Weber's law says detectability follows relative change
 in luminance, and Fechner's reading of it makes perceived brightness
@@ -104,8 +118,8 @@ the sRGB point with exponent 0.5 gives about 34 nits at 10 lux, 80 at
 a power function for preferred luminance; a reading-comfort study found
 low ambient light favoured lower luminance with a strong interaction
 between the two. The anchors above sit between that heuristic and the
-display's own idea of dim, because the offset (stage 6) absorbs personal
-preference. They were tuned by eye
+display's own idea of dim, because the preference (stage 6) absorbs
+personal taste. They were tuned by eye
 against these references, not with a light meter.
 
 The previous table, inherited from an XDR plugin, floored at 12%, about
@@ -142,15 +156,19 @@ How each poll's move is written:
 
 | Choice | Value | Why |
 |--------|-------|-----|
-| Pacing | Spread over the poll, on a clock from the fade's start | Writing the move back to back and then idling until the next poll reads as a stutter: a burst, then a pause. |
-| Frame rate | One write per write's time, at most 60 a second (`max_frame_rate`) | Past the rate at which the eye resolves discrete steps in a smooth change; a laptop backlight write costs about 4 ms, so 60 is the binding limit there. A slower display writes as fast as it can. |
-| Resolution | The display's own units, from its profile | A laptop backlight has 192000 levels; whole percents are 1920 apart, and at 5% one percent is 20% more light, well past the 1 to 2% target. |
+| Pacing | Spread over the poll, on a clock from the fade's start. A frame that rounds to the unit before it is dropped and the rest close up, so a coarse display's few steps come early in the poll | Writing the move back to back and then idling until the next poll reads as a stutter: a burst, then a pause. |
+| Frame rate | One write per read-back and write, at most 60 a second (`maxFrameRate`); every automatic write follows a fresh read (stage 7) | Past the rate at which the eye resolves discrete steps in a smooth change; a laptop backlight write costs about 4 ms, so 60 is the binding limit there. A slower display writes as fast as it can. |
+| Resolution | The display's own units: a backlight's `max_brightness`, else percent | A laptop backlight has 192000 levels; whole percents are 1920 apart, and at 5% one percent is 20% more light, well past the 1 to 2% target. |
 | Shape | Log luminance when levels are fine, linear when coarse | Equal steps in log luminance look equal; in linear percent the dim end jumps. On a coarse display a log fade only bunches its few visible steps together. |
-| Deadline | A poll's fade stops when the poll is up | A write slower than estimated cannot hold up commands or the next poll, which fades on from where the display got to. |
-| First estimate | 20 ms, measured from the first write on | Optimistic, so a fast panel is smooth from its first fade; a slow display only meets the deadline once. |
+| Replanning | Each sample's frames replace those still to come, starting from where the display has got to | A write slower than estimated cannot hold up the user or the next sample. |
+| First estimate | 20 ms, measured from the first write on | Optimistic, so a fast panel is smooth from its first fade; a slow display falls behind only once. |
 
-On the Studio Display a write takes about 80 ms, so a poll's move is six
-writes about two points apart. The `asdcontrol` README reports about 20
+A DDC/CI monitor gets no fade: each write is slow, unverified, and on
+some monitors saved to non-volatile memory, so only the final target is
+written, automatic changes at most every 5 s. The user's are written at once.
+
+On the Studio Display a write takes about 80 ms, plus the read-back
+before it, so a poll's move is a few writes a couple of points apart. The `asdcontrol` README reports about 20
 visible backlight levels on 2022 firmware; the firmware accepts every
 percent (raw values 596 apart), and whether each is visible has not been
 measured. The earlier exponential ramp spread a 40-point dim over 15 s,
@@ -158,10 +176,23 @@ one hop every 2 s.
 
 ### 6. Learning from manual changes
 
-A manual change while auto is on becomes the offset: chosen minus
-curve(lux) at that moment. It is added to the curve at every light level
-from then on, persisted with the plugin's settings, and cleared only by
-the user, through the restore button or the setting.
+A manual change while auto is on becomes that display's preference: the
+ratio of the chosen luminance to the curve's at that moment, kept as a
+percentage, so `+20%` is a fifth more light than the curve gives. It
+multiplies the curve at every light level from then on, is persisted with
+the plugin's settings under that display, and is cleared only by the user,
+through the restore button or IPC.
+
+A ratio rather than an added number of points, because perceived
+brightness follows relative change in luminance (stage 4): "a bit
+brighter than it picks" means the same thing at 5 lux and at 1500, while
+eight points more than doubles the light in the dark and is barely seen
+in daylight.
+
+A change made before any light level is accepted is learned on the first
+one. A change found by a read-back, a hotkey most likely, is learned the
+same way, except when it follows an explicit reset or Auto toggle: then
+it is adopted without learning, since the press came before.
 
 Android's short-term model records the (lux, chosen brightness) pair,
 biases the mapping around that lux, and discards it after a configurable
@@ -176,11 +207,42 @@ rather than near the one it was learned at. Both are deliberate. A desk
 display does not move between rooms the way a phone does, so the
 timeout Android needs would only surprise: the same room at one in the
 morning should not snap back from a level chosen at nine. A single
-offset rather than a per-lux one is the simplest model that matches how
-people describe the preference, "a bit brighter than it picks", and it
-is visible and reversible in one place. An earlier version expired the
-correction after four hours or a fourfold change in light; the timer had
-no justification and was removed.
+ratio rather than a per-lux one is the simplest model that matches how
+people describe the preference, and it is visible and reversible in one
+place. An earlier version expired the correction after four hours or a
+fourfold change in light; the timer had no justification and was removed.
+
+The single additive offset from before displays were kept apart migrates
+to the display the old controller would drive now, the Studio Display
+else the laptop panel and never a DDC monitor, as the ratio that gives
+the same brightness at the first light level accepted. Which display it
+was learned on was never recorded.
+
+### 7. Driving several displays
+
+Each display's hardware operations run one at a time, through a scheduler
+of its own (`Endpoint.js`):
+
+| Rule | Why |
+|------|-----|
+| A user write goes before any automatic one, and replaces an older one | The hand lands at once; a queued fade step must not undo it. |
+| An automatic write needs a read-back after the last write, under 0.5 s old | A hotkey pressed mid-fade is seen and adopted, not overwritten by the next step. |
+| Idle read-backs every 10 s, 30 s over DDC/CI | Hotkeys and other tools are noticed without a busy loop. |
+| Every helper runs under `timeout`, its process group killed on expiry | A hung `ddcutil` or `sudo` cannot hold a display, nor write late. |
+| Reads and writes back off separately after failures | A display that cannot be read can still be set by hand. |
+
+Which sensor serves which display, and whether a display is active, comes
+from a probe of Hyprland's outputs, the IIO devices, the lid and the
+EDIDs, run on monitor events and every 10 s; it is never per sample.
+Sensors no active display reads are not sampled, so with every display
+off only the probe runs.
+
+Settings are keyed by what a display is, its make, model and serial, not
+where it is plugged. A display without a serial is keyed by its port too.
+Two displays reporting the same serial, a manufacturer's error, are told
+apart by output name while both are connected; once one is unplugged the
+other takes the plain key, whichever owned it. Keying every display by
+port instead would lose its settings to every change of port.
 
 ## Alternatives considered
 
@@ -190,15 +252,17 @@ no justification and was removed.
 | Reusing the XDR plugin's curve | Anchored in percent on a different panel with a two-sensor requirement; the floor was 72 nits. |
 | Turning auto off on manual change | Contradicts every reference implementation and leaves the user to re-enable it. |
 | Slower dim for comfort | On a 20-step panel slower means more visible hops, see stage 5. |
+| One curve in percent for every display | The same percent is twice the light on a panel twice as bright; nits plus each display's luminance put them on one scale. |
+| An added offset in points | Eight points more than doubles the light in the dark and is barely seen in daylight; a ratio means the same at every level, see stage 6. |
+| Driving one display at a time | A laptop open beside a monitor leaves one of them stale, and its learned offset applied to the wrong screen. |
 
 ## Open questions
 
 - Panel sensors are trusted to report lux at the kernel's scale; a cover
   test would confirm it.
-- Whether the shared curve suits the laptop panel. It is anchored in the
-  Studio Display's nits; a panel with another peak is off by a roughly
-  constant amount, which the offset absorbs, so per-display anchors wait
-  until that proves wrong.
+- Displays without HDR metadata in their EDID are assumed to peak at
+  600 nits. A brighter or dimmer one is off by a roughly constant ratio, which
+  its preference absorbs; a measured peak would remove the need.
 
 - The nits mapping assumes Apple's 600 nit rating is the raw maximum. A
   light meter reading at two percentages would settle it.
@@ -208,7 +272,7 @@ no justification and was removed.
 - Whether one-point backlight steps are visible on this panel. If not,
   the dim step could be two points at no cost.
 - Whether a per-lux correction, as Android and Plasma keep, would beat a
-  single offset once someone lives with it across a full day of light.
+  single ratio once someone lives with it across a full day of light.
 
 ## Sources
 
