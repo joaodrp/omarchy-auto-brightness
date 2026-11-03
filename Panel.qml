@@ -18,10 +18,10 @@ Panel {
   readonly property bool autoEnabled: service?.enabled ?? false
   readonly property int offset: service?.offset ?? 0
   readonly property int lux: Math.round(service?.lux ?? 0)
-  readonly property bool canRestore: autoEnabled && offset !== 0
+  readonly property bool canRestore: autoEnabled && (service?.hasPreference ?? false)
   readonly property string icon: autoEnabled ? "󰃟" : "󰃠"
 
-  // The slider follows the controller, except while the pointer drags it.
+  // The slider follows the display, except while the pointer drags it.
   property int brightnessPercent: 0
   property real wheelAccumulator: 0
 
@@ -37,7 +37,7 @@ Panel {
 
   function chipText() {
     if (!autoEnabled) return "Manual"
-    return "Auto" + (offset ? (offset > 0 ? " +" : " ") + offset : "")
+    return "Auto" + (offset ? (offset > 0 ? " +" : " ") + offset + "%" : "")
   }
 
   function setBrightness(value) {
@@ -90,8 +90,8 @@ Panel {
   implicitWidth: available ? button.implicitWidth : 0
   implicitHeight: available ? button.implicitHeight : 0
 
-  // Dragging sends at most one value per beat; the controller writes at most
-  // one per poll anyway.
+  // Dragging sends at most one value per beat; the display takes one write
+  // at a time anyway.
   Timer {
     id: brightnessDebounce
     interval: 180
@@ -159,11 +159,11 @@ Panel {
             Row {
               spacing: Style.space(6)
 
-              // Back to the curve. Only while an offset is set.
+              // Back to the curve. Only while a preference is set.
               Button {
                 visible: root.canRestore
                 iconText: "\u{F099B}"
-                tooltipText: "Back to the curve, dropping " + (root.offset > 0 ? "+" : "") + root.offset
+                tooltipText: "Back to the curve, dropping " + (root.offset ? (root.offset > 0 ? "+" : "") + root.offset + "%" : "a slight preference")
                 bordered: true
                 foreground: root.bar.foreground
                 fontFamily: root.bar.fontFamily

@@ -47,6 +47,10 @@ function create(kind, generation) {
     value: null,         // units last written or read; null until known
     lastWrite: -Infinity,
     lastRead: -Infinity,
+    // Which operation, in start order, last wrote and last read: clocks are
+    // too coarse to tell a write from the read just after it.
+    writeSeq: 0,
+    readSeq: 0,
     readEpoch: 0,        // read requests so far; a read started before the latest answers none
     readFailures: 0,
     writeFailures: 0,
@@ -77,7 +81,7 @@ function requestRead(state) { return copy(state, { lastRead: -Infinity, readEpoc
 // `from` is "user" or "auto" for a write: the target it takes.
 function start(state, op, from, now) {
   var units = from ? state[from] : null
-  var busy = { id: state.generation + ":" + state.nextId, op: op, from: from, units: units, epoch: state.readEpoch, started: now, killed: false }
+  var busy = { id: state.generation + ":" + state.nextId, seq: state.nextId, op: op, from: from, units: units, epoch: state.readEpoch, started: now, killed: false }
   var changes = { busy: busy, nextId: state.nextId + 1 }
   if (from) changes[from] = null
   return { state: copy(state, changes), op: { id: busy.id, op: op, units: units }, kill: null, wake: now + state.policy.timeout }
@@ -108,7 +112,7 @@ function next(state, now) {
   if (state.auto !== null) {
     var writable = Math.max(state.lastWrite + p.interval, state.writeRetryAt)
     if (now >= writable) {
-      if (state.lastRead > state.lastWrite && now - state.lastRead <= freshRead) return start(state, "write", "auto", now)
+      if (state.readSeq > state.writeSeq && now - state.lastRead <= freshRead) return start(state, "write", "auto", now)
       needRead = true
     } else {
       wakes.push(writable)
@@ -140,10 +144,10 @@ function complete(state, id, ok, now, value) {
     return { state: copy(state, changes), moved: null }
   }
   if (busy.op === "write")
-    return { state: copy(state, { busy: null, writeFailures: 0, value: busy.units, lastWrite: now }), moved: null }
+    return { state: copy(state, { busy: null, writeFailures: 0, value: busy.units, lastWrite: now, writeSeq: busy.seq }), moved: null }
   if (busy.epoch !== state.readEpoch) return { state: copy(state, { busy: null, readFailures: 0 }), moved: null }
   var moved = state.value !== null && value !== state.value ? value : null
-  var read = { busy: null, readFailures: 0, value: value, lastRead: now }
+  var read = { busy: null, readFailures: 0, value: value, lastRead: now, readSeq: busy.seq }
   if (moved !== null) read.auto = null
   return { state: copy(state, read), moved: moved }
 }

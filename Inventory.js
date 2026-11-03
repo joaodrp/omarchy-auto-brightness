@@ -166,3 +166,13 @@ function lidState(text) {
   var m = /state:\s*(open|closed)/.exec(String(text || ""))
   return m ? m[1] : "unknown"
 }
+
+// Lux from a sensor's reading, `(raw + offset) * scale` with the kernel's
+// scale and offset, or null when the reading is not a number. The Studio
+// Display reports millilux, though its kernel scale reads 1.0.
+function lux(sensor, text) {
+  var t = String(text || "").trim()
+  if (!/^[0-9]+(\.[0-9]+)?$/.test(t)) return null
+  var scale = sensorOrigin(sensor) === "apple" ? 0.001 : (Number(sensor.scale) || 1)
+  return (Number(t) + (Number(sensor.offset) || 0)) * scale
+}

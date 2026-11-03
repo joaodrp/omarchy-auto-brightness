@@ -89,6 +89,16 @@ test("a hotkey press during a fade is seen before the next frame", () => {
   assert.equal(e.next(c.state, 1.03).op, null)
 })
 
+test("a read that started after a write is fresh, even in the same instant", () => {
+  // Clocks are coarse: a write and the read after it can share a timestamp.
+  let st = e.requestAuto(idle("panel"), 31)
+  st = run(st, 1, 1, true, 30).state     // read
+  st = run(st, 1, 1).state               // write 31
+  st = e.requestAuto(st, 32)
+  st = run(st, 1, 1, true, 31).state     // read, same instant
+  assert.equal(e.next(st, 1).op.op, "write")
+})
+
 test("a user's change is written at once, without a read-back, and replaces the automatic target", () => {
   let st = e.requestAuto(idle("ddc"), 70)
   st = e.requestUser(st, 20)

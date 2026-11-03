@@ -1,13 +1,16 @@
 import QtQuick
+import Quickshell.Hyprland
 import Quickshell.Io
+import "Control.js" as Control
+import "Inventory.js" as Inventory
 import "Settings.js" as Settings
 
-// Owns the auto brightness controller. Settings live inline on this plugin's
-// shell.json entry as `auto` (default on) and `offset` (default 0). Changes
-// made here, from the panel, IPC or an offset the controller learned, go to
-// the controller at once and are then persisted; a change made in Setup
-// arrives through the config. Settings.js keeps the two apart. Live readings
-// come back as JSON lines.
+// Auto brightness for every display that can be driven. The probe reports
+// outputs, sensors, the lid and EDIDs; Inventory.js turns that into displays,
+// each a DisplayChannel. Sensors some active display reads are sampled every
+// half second, smoothed once each, and their lux fed to the displays they
+// serve. Settings live inline on this plugin's shell.json entry, per display
+// (Settings.js); a change made in Setup arrives through the config.
 Item {
   id: root
 
@@ -15,22 +18,40 @@ Item {
   property var shell: null
   property var manifest: null
 
-  property bool enabled: true
-  property int offset: 0
-
-  property bool hardwareAvailable: false
-  property string monitor: ""
-  property real lux: 0
-  property int brightness: 0
-  property real target: 0
-  property string error: "Starting"
-
+  property var settings: null          // Settings.js state, null until the config is read
+  property var channels: ({})          // display id -> DisplayChannel
+  property var channelList: []         // the same, in inventory order, for bindings
+  property var sensors: ({})           // sensor path -> { sensor, view, filtered, at }
+  property var lastProbe: null
   property bool tearingDown: false
 
-  // Settings.js state, null until the first controller starts, and the lines
-  // written to the running controller.
-  property var settings: null
-  property int sentLines: 0
+  // The display the single panel shows: the Studio Display when it can be
+  // driven, else the laptop panel, else the first other.
+  readonly property var primary: {
+    var list = channelList
+    var order = ["apple", "panel", "ddc"]
+    for (var k = 0; k < order.length; k++)
+      for (var i = 0; i < list.length; i++)
+        if (list[i].active && list[i].kind === order[k]) return list[i]
+    return null
+  }
+
+  // What the panel binds to: the primary display's.
+  readonly property bool hardwareAvailable: primary !== null && primary.hasSensor
+  readonly property bool enabled: primary ? primary.auto : (settings ? settings.held.auto : true)
+  readonly property int offset: primary ? Math.round(primary.preference) : 0
+  // The display a legacy offset belongs to, by id, or null.
+  readonly property var legacyOwner: Settings.legacyOwner(channelList.map(function(ch) {
+    return { id: ch.displayId, kind: ch.kind, active: ch.active }
+  }))
+  readonly property bool hasPreference: primary !== null && primary.preference !== 0
+  readonly property string monitor: primary ? primary.name : ""
+  readonly property real lux: primary ? primary.lux : 0
+  readonly property int brightness: primary ? primary.brightness : 0
+  readonly property real target: primary ? primary.target : 0
+  readonly property string error: primary ? (primary.error || primary.sensorError) : (lastProbe ? "No supported display connected" : "Starting")
+
+  function now() { return Date.now() / 1000 }
 
   function configEntry() {
     var sections = ["left", "center", "right"]
@@ -43,29 +64,30 @@ Item {
     return ({})
   }
 
-  function send(line) {
-    if (!controller.running) return false
-    controller.write(line + "\n")
-    sentLines++
-    return true
-  }
+  // Settings ---------------------------------------------------------------
 
-  function apply(result) {
-    settings = result.state
-    enabled = settings.held.auto
-    offset = settings.held.offset
-    for (var i = 0; i < result.lines.length; i++) send(result.lines[i])
+  function applySettings() {
+    if (!settings) return
+    for (var id in channels) {
+      var d = Settings.displaySettings(settings.held, id)
+      channels[id].auto = d.auto
+      channels[id].preference = d.preference
+    }
   }
 
   function syncSettings() {
+    if (!shell || !manifest) return
     var next = Settings.read(configEntry())
     if (!settings) {
-      enabled = next.auto
-      offset = next.offset
+      settings = Settings.start(next)
+      applySettings()
+      // A write; not from inside the shell's announcement (see below).
+      Qt.callLater(keepFirstAuto)
       return
     }
     var result = Settings.configEvent(settings, next)
-    apply(result)
+    settings = result.state
+    if (result.changed) applySettings()
     // The shell announces a config before saving it, so a save from inside
     // the announcement would land first and be overwritten by the one in
     // progress. Write it back once that one is issued, as held by then: an
@@ -73,71 +95,246 @@ Item {
     if (result.restore) Qt.callLater(restoreHeld)
   }
 
-  function restoreHeld() { change({}, false) }
+  function restoreHeld() { change({}) }
 
-  // A change of ours. `tell` is false when the controller made it.
-  function change(values, tell) {
-    if (!shell || !manifest) return
-    var result = Settings.own(settings || Settings.start(Settings.read(configEntry())).state, values)
-    if (!tell) result.lines = []
-    apply(result)
-    shell.updateEntryInline(manifest.id, Object.assign({}, configEntry(), result.persist, { id: manifest.id }))
+  // A change of ours, persisted. `patch` as Settings.own takes it.
+  function change(patch) {
+    if (!shell || !manifest || !settings) return
+    var result = Settings.own(settings, patch)
+    settings = result.state
+    if (result.changed) applySettings()
+    shell.updateEntryInline(manifest.id, Settings.entryWith(configEntry(), result.persist))
   }
 
-  function setEnabled(value) { change({ auto: value === true }, true) }
-  function setOffset(value) { change({ offset: Math.round(Number(value)) }, true) }
-  function clearOffset() { setOffset(0) }
+  function displayPatch(id, values) { var d = {}; d[id] = values; return { displays: d } }
 
-  // The user picked a brightness. The controller writes it, and with auto on
-  // turns it into the offset, which comes back in its status.
-  function setBrightness(percent) { send("manual " + Math.round(Number(percent))) }
-
-  // The host strips `__sourceDir` from third-party manifests, so the
-  // controller is found next to this file instead.
-  readonly property string controllerPath:
-    decodeURIComponent(String(Qt.resolvedUrl("controller")).replace(/^file:\/\//, ""))
-
-  function startController() {
-    if (controller.running) return
-    controller.command = ["setpriv", "--pdeathsig", "TERM", controllerPath]
-    controller.running = true
-    sentLines = 0
-    apply(Settings.start(Settings.read(configEntry()), settings))
+  // A preference the user sets on the display the legacy offset belongs to
+  // supersedes that offset, so a later migration cannot bring it back.
+  function preferencePatch(ch, preference) {
+    var patch = displayPatch(ch.displayId, { preference: preference })
+    if (settings && settings.held.offset !== undefined && ch.displayId === legacyOwner) patch.offset = null
+    return patch
   }
 
-  function applyStatus(line) {
-    try {
-      var status = JSON.parse(String(line))
-      hardwareAvailable = status.available === true
-      monitor = status.monitor
-      lux = status.lux
-      brightness = status.brightness
-      target = status.target
-      error = status.error
-      var learned = Settings.learnedOffset(status, sentLines, offset)
-      if (learned !== null) change({ offset: learned }, false)
-    } catch (e) {
-      error = "Invalid controller status"
+  // The additive offset from before displays were kept apart becomes the
+  // preference of the display the old controller would drive now
+  // (Settings.legacyOwner), once its light level is known, so its brightness
+  // does not jump. Which display it was learned on is not recorded.
+  function migrate(channel) {
+    if (!settings || settings.held.offset === undefined || channel.displayId !== legacyOwner || channel.accepted.accepted === null) return
+    var patch = displayPatch(channel.displayId, { preference: Control.preferenceFromOffset(settings.held.offset, channel.accepted.accepted, channel.lum) })
+    patch.offset = null
+    change(patch)
+  }
+
+  // Panel actions, on the primary display.
+  function setEnabled(value) { if (primary) change(displayPatch(primary.displayId, { auto: value === true })) }
+  function clearOffset() {
+    if (!primary) return
+    primary.rebaseline()
+    change(preferencePatch(primary, null))
+  }
+  function setBrightness(percent) {
+    var p = Number(percent)
+    if (!primary || !isFinite(p)) return false
+    primary.setBrightness(p)
+    return true
+  }
+
+  // Inventory ----------------------------------------------------------------
+
+  // The probe's facts, as Inventory.displays wants them, then reconciled with
+  // the channels and sensors there are.
+  function applyProbe(line) {
+    var facts
+    try { facts = JSON.parse(String(line)) } catch (e) { console.warn("auto-brightness probe: " + e); return }
+    lastProbe = facts
+    var edid = {}
+    for (var name in facts.edid || {}) edid[name] = Inventory.edidLuminance(facts.edid[name])
+    var previous = {}
+    for (var id in channels) previous[id] = channels[id].sensorPath
+    var list = Inventory.displays(facts.monitors || [], facts.sensors || [], Inventory.lidState(facts.lid), edid, previous)
+
+    var next = {}, order = []
+    for (var i = 0; i < list.length; i++) {
+      var d = list[i]
+      if (!d.kind) continue
+      var panel = d.kind === "panel"
+      // A panel is written in its backlight's own units: none without its range.
+      if (panel && !(facts.backlight && facts.backlight.max > 0)) continue
+      var props = {
+        displayId: d.id, name: d.name, kind: d.kind, luminance: d.luminance,
+        sensorReason: d.sensorReason || "",
+        backlight: panel ? facts.backlight.name : "",
+        levels: panel ? facts.backlight.max : 100
+      }
+      var ch = channels[d.id]
+      // A display whose output or way of driving changed starts over.
+      if (ch && (ch.name !== props.name || ch.kind !== props.kind || ch.backlight !== props.backlight || ch.levels !== props.levels)) {
+        ch.destroy()
+        ch = null
+      }
+      if (!ch) {
+        ch = channelComponent.createObject(root, props)
+        ch.learned.connect(learnedFor(ch))
+        ch.accepting.connect(migratorFor(ch))
+      } else {
+        // By value: the probe builds new objects every time.
+        for (var k in props) if (JSON.stringify(ch[k]) !== JSON.stringify(props[k])) ch[k] = props[k]
+      }
+      // Another sensor reads another room: accept its light afresh.
+      if (ch.sensorPath !== (d.sensor || "")) ch.resetLight()
+      ch.sensorPath = d.sensor || ""
+      ch.active = d.active
+      next[d.id] = ch
+      order.push(ch)
+    }
+    for (var old in channels) if (!next[old]) channels[old].destroy()
+    channels = next
+    channelList = order
+    keepFirstAuto()
+    applySettings()
+    syncSensors(facts.sensors || [], Inventory.sensorsInUse(list))
+  }
+
+  function learnedFor(ch) {
+    return function(preference) { root.change(root.preferencePatch(ch, preference)) }
+  }
+
+  function migratorFor(ch) { return function() { root.migrate(ch) } }
+
+  // A display seen for the first time takes the default Auto into its own
+  // record, so a later change to the default reaches only newer displays.
+  function keepFirstAuto() {
+    if (!settings) return
+    var patch = { displays: {} }, any = false
+    for (var id in channels) {
+      var record = settings.held.displays[id]
+      if (record && record.auto !== undefined) continue
+      patch.displays[id] = { auto: settings.held.auto }
+      any = true
+    }
+    if (any) change(patch)
+  }
+
+  // Sample exactly the sensors some active display reads.
+  function syncSensors(all, inUse) {
+    var byPath = {}
+    for (var i = 0; i < all.length; i++) byPath[all[i].path] = all[i]
+    var next = {}
+    for (var j = 0; j < inUse.length; j++) {
+      var path = inUse[j]
+      var sampled = sensors[path]
+      if (sampled && sampled.sensor.file !== byPath[path].file) { sampled.view.destroy(); sampled = null }
+      if (!sampled) sampled = { sensor: byPath[path], view: sensorComponent.createObject(root, { path: byPath[path].file, sensorPath: path }), filtered: null, at: -1, good: now() }
+      else sampled.sensor = byPath[path]
+      next[path] = sampled
+    }
+    for (var old in sensors) if (!next[old]) sensors[old].view.destroy()
+    sensors = next
+    sampleTimer.running = inUse.length > 0
+    checkSensors()
+  }
+
+  function sampleAll() {
+    checkSensors()
+    for (var path in sensors) sensors[path].view.reload()
+  }
+
+  // A sensor with no good reading for 3 s, failed, invalid or hung, is
+  // reported on every display it serves. A hung read is left to finish: the
+  // view folds reloads into it, and restarting it cannot interrupt the
+  // kernel, only tie up another reader thread.
+  readonly property real sensorDeadline: 3
+  function checkSensors() {
+    var t = now()
+    for (var id in channels) {
+      var ch = channels[id], used = sensors[ch.sensorPath]
+      var message = used && t - used.good > sensorDeadline ? "Cannot read the light sensor" : ""
+      if (ch.sensorError !== message) ch.sensorError = message
     }
   }
 
+  function sensorRead(sensorPath, text) {
+    var sampled = sensors[sensorPath]
+    if (!sampled) return
+    var lux = Inventory.lux(sampled.sensor, text)
+    if (lux === null) return
+    var t = now()
+    sampled.good = t
+    sampled.filtered = Control.smooth(sampled.filtered, lux, sampled.at < 0 ? 0 : t - sampled.at)
+    sampled.at = t
+    for (var id in channels) {
+      var ch = channels[id]
+      if (ch.sensorPath === sensorPath) ch.sample(sampled.filtered, t)
+    }
+  }
+
+  function probe() { if (!probeProc.running) probeProc.running = true }
+
+  // The probe sits next to this file; the host strips `__sourceDir` from
+  // third-party manifests.
+  readonly property string probePath:
+    decodeURIComponent(String(Qt.resolvedUrl("probe")).replace(/^file:\/\//, ""))
+
   Process {
-    id: controller
-    stdinEnabled: true
-    stdout: SplitParser { onRead: function(line) { root.applyStatus(line) } }
-    stderr: SplitParser { onRead: function(line) { console.warn("auto-brightness controller: " + line) } }
+    id: probeProc
+    // Bounded as a whole: a stalled sysfs read would hold every later probe.
+    command: ["setpriv", "--pdeathsig", "TERM", "timeout", "-k", "1", "10", root.probePath]
+    stdout: StdioCollector { id: probeOut; waitForEnd: true }
     onExited: function(exitCode) {
       if (root.tearingDown) return
-      root.error = "Controller exited (" + exitCode + ")"
-      restartTimer.restart()
+      if (exitCode === 0) root.applyProbe(probeOut.text)
+      else console.warn("auto-brightness probe exited " + exitCode)
+    }
+  }
+
+  // Outputs come and go with events; DPMS and the lid have none, so the
+  // probe also runs every 10 s. A wall clock far ahead of the last probe
+  // means the machine slept: every display reads back afresh.
+  property real lastTick: 0
+  Timer {
+    interval: 10000
+    repeat: true
+    running: root.manifest !== null
+    triggeredOnStart: true
+    onTriggered: {
+      var t = root.now()
+      if (root.lastTick && t - root.lastTick > 30)
+        for (var id in root.channels) if (root.channels[id].active) root.channels[id].attach()
+      root.lastTick = t
+      root.probe()
+    }
+  }
+
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      var name = String(event && event.name ? event.name : "")
+      if (/^monitor(added|removed)/.test(name) || name === "configreloaded") root.probe()
     }
   }
 
   Timer {
-    id: restartTimer
-    interval: 2000
-    repeat: false
-    onTriggered: root.startController()
+    id: sampleTimer
+    interval: 500
+    repeat: true
+    onTriggered: root.sampleAll()
+  }
+
+  Component {
+    id: channelComponent
+    DisplayChannel { property string sensorPath: "" }
+  }
+
+  Component {
+    id: sensorComponent
+    FileView {
+      property string sensorPath: ""
+      blockLoading: false
+      printErrors: false
+      onLoaded: root.sensorRead(sensorPath, text())
+    }
   }
 
   Connections {
@@ -146,7 +343,7 @@ Item {
   }
 
   onShellChanged: syncSettings()
-  onManifestChanged: startController()
+  onManifestChanged: syncSettings()
 
   IpcHandler {
     target: "auto-brightness"
@@ -160,7 +357,14 @@ Item {
         brightness: root.brightness,
         target: root.target,
         offset: root.offset,
-        error: root.error
+        error: root.error,
+        displays: root.channelList.map(function(ch) {
+          return {
+            id: ch.displayId, monitor: ch.name, kind: ch.kind, active: ch.active, auto: ch.auto,
+            sensor: ch.sensorReason, lux: ch.lux, brightness: ch.brightness, target: ch.target,
+            preference: ch.preference, error: ch.error, sensorError: ch.sensorError
+          }
+        })
       })
     }
     function enable(): string { root.setEnabled(true); return "enabled" }
@@ -171,12 +375,14 @@ Item {
       return next ? "enabled" : "disabled"
     }
     function forget(): string { root.clearOffset(); return "forgot" }
-    function set(percent: string): string { root.setBrightness(percent); return "set " + Math.round(Number(percent)) }
+    function set(percent: string): string {
+      return root.setBrightness(percent) ? "set " + Math.round(Number(percent)) : "not set: no display, or not a number"
+    }
   }
 
   Component.onDestruction: {
     tearingDown = true
-    restartTimer.stop()
-    controller.running = false
+    for (var id in channels) channels[id].destroy()
+    for (var path in sensors) sensors[path].view.destroy()
   }
 }

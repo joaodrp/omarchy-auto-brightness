@@ -1,0 +1,69 @@
+#!/bin/bash
+
+# The facts Inventory.js works from, as one JSON line on stdout:
+#   monitors   `hyprctl monitors all -j`, disabled outputs included
+#   sensors    IIO illuminance devices: resolved sysfs path, name, the file to
+#              sample, and the kernel's scale and offset
+#   lid        the first ACPI lid's state line, or ""
+#   edid       per output name, its EDID as `od -An -v -tx1` prints it
+#   backlight  the internal panel's backlight: name and max_brightness
+# Service.qml runs it on monitor events and every 10 s, never per sample.
+
+set -u
+export LC_ALL=C
+
+monitors=$(timeout 5 hyprctl monitors all -j 2>/dev/null) || monitors='[]'
+jq -e 'type == "array"' >/dev/null 2>&1 <<<"$monitors" || monitors='[]'
+
+sensors=""
+for dev in /sys/bus/iio/devices/iio:device*; do
+  [[ -r $dev/name ]] || continue
+  scale=1 offset=0
+  if [[ -r $dev/in_illuminance_raw ]]; then
+    file=$dev/in_illuminance_raw
+    [[ -r $dev/in_illuminance_scale ]] && scale=$(<"$dev/in_illuminance_scale")
+    [[ -r $dev/in_illuminance_offset ]] && offset=$(<"$dev/in_illuminance_offset")
+  elif [[ -r $dev/in_illuminance_input ]]; then
+    file=$dev/in_illuminance_input
+  else
+    continue
+  fi
+  sensors+="$(readlink -f "$dev")"$'\t'"$(<"$dev/name")"$'\t'"$file"$'\t'"$scale"$'\t'"$offset"$'\n'
+done
+
+lid=""
+for state in /proc/acpi/button/lid/*/state; do
+  [[ -r $state ]] && { lid=$(<"$state"); break; }
+done
+
+edid=""
+for name in $(jq -r '.[].name' <<<"$monitors"); do
+  for file in /sys/class/drm/card*-"$name"/edid; do
+    # sysfs reports a size of 0 whatever the EDID holds, so read to know.
+    [[ -r $file ]] || continue
+    hex=$(od -An -v -tx1 "$file" | tr -s ' \n' ' ')
+    [[ -n ${hex// /} ]] || continue
+    edid+="$name"$'\t'"$hex"$'\n'
+    break
+  done
+done
+
+backlight=$(omarchy-hw-display 2>/dev/null) || backlight=""
+max=""
+[[ -n $backlight && -r /sys/class/backlight/$backlight/max_brightness ]] && max=$(<"/sys/class/backlight/$backlight/max_brightness")
+
+jq -cn \
+  --argjson monitors "$monitors" \
+  --arg sensors "$sensors" \
+  --arg lid "$lid" \
+  --arg edid "$edid" \
+  --arg backlight "$backlight" \
+  --arg max "$max" '
+  def rows: split("\n") | map(select(length > 0) | split("\t"));
+  {
+    monitors: $monitors,
+    sensors: ($sensors | rows | map({ path: .[0], name: .[1], file: .[2], scale: (.[3] | tonumber? // 1), offset: (.[4] | tonumber? // 0) })),
+    lid: $lid,
+    edid: ($edid | rows | map({ key: .[0], value: .[1] }) | from_entries),
+    backlight: (if $backlight == "" then null else { name: $backlight, max: ($max | tonumber? // null) } end)
+  }'
