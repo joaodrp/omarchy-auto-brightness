@@ -29,6 +29,9 @@ jobs:
       - name: Control unit tests
         run: node test/control.test.js
 
+      - name: Inventory unit tests
+        run: node test/inventory.test.js
+
       - name: Manifest matches the repo and the README
         run: python3 .github/check-manifest.py
 

@@ -17,6 +17,8 @@ model, how it is connected, what `hyprctl monitors -j` reports for `make` and
 | `test/settings.test.js` | Unit tests for `Settings.js`, run under node |
 | `Control.js` | The control pipeline as pure functions: smoothing, hysteresis, debounce, the curve in nits, ramp and learning. Qt-free |
 | `test/control.test.js` | Unit tests for `Control.js`, run under node |
+| `Inventory.js` | Which displays exist, which are active, how each is driven and which sensor serves it. Qt-free |
+| `test/inventory.test.js` | Unit tests for `Inventory.js`, run under node |
 | `Panel.qml` | The bar icon and the panel |
 | `docs/design.md` | Why each stage of the controller is the way it is, with sources |
 | `preview.png` | The listing image the [plugin marketplace](https://plugins.omarchy.org/publish.html) reads from the repository root |
@@ -48,6 +50,7 @@ qs log -p "$OMARCHY_PATH/shell" --tail 60   # QML errors land here, and only wit
 ./controller --self-test           # curve, hysteresis, debounce, ramp, offset
 node test/settings.test.js         # what the service sends and persists
 node test/control.test.js          # the control pipeline in JS
+node test/inventory.test.js        # displays, sensors, identity, EDID luminance
 omarchy plugin validate "$PWD"
 python3 .github/check-manifest.py  # manifest, README table and Service.qml reads agree
 
