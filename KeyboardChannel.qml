@@ -64,6 +64,14 @@ Item {
     pump()
   }
 
+  // Read the LED back soon, as after a hotkey.
+  // One already running answers it: a newer request would discard it.
+  function refresh() {
+    if (!endpoint || (endpoint.busy && endpoint.busy.op === "read")) return
+    endpoint = Endpoint.requestRead(endpoint)
+    pump()
+  }
+
   function rebaseline() {
     if (!endpoint) return
     quiet = true
