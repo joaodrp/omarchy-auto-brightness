@@ -1,6 +1,7 @@
-// Pure, Qt-free scheduling for one display's brightness endpoint, so it runs
-// under node too (test/endpoint.test.js). The service runs the operations it
-// returns (a helper process per write or read) and reports each completion.
+// Pure, Qt-free scheduling for one brightness endpoint, a display's or the
+// keyboard's, so it runs under node too (test/endpoint.test.js). The
+// service runs the operations it returns (a helper process per write or
+// read) and reports each completion.
 //
 // One operation runs at a time, each with its own id; a completion that is
 // not the running operation's is ignored. Two targets wait their turn, apart:
@@ -26,6 +27,8 @@
 var policies = {
   apple: { fade: true, interval: 0, readEvery: 10, timeout: 10 },
   panel: { fade: true, interval: 0, readEvery: 10, timeout: 10 },
+  // A keyboard LED through brightnessctl, read from sysfs, as a panel is.
+  keyboard: { fade: true, interval: 0, readEvery: 10, timeout: 10 },
   // DDC/CI is slow, a write is not verified, and some monitors keep every
   // change in non-volatile memory: no fade, and changes far apart.
   ddc: { fade: false, interval: 5, readEvery: 30, timeout: 10 }

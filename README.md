@@ -19,6 +19,8 @@ once; see [Displays](#displays).
   becomes that display's preference: how much brighter or dimmer than the
   curve, shown on the chip as `Auto +24` and kept until you press the
   restore button beside it.
+- Optionally, the laptop's keyboard backlight too: lit in a dark room, off
+  in a lit one; see [Keyboard backlight](#keyboard-backlight).
 
 ## Requirements
 
@@ -49,7 +51,9 @@ Setup > Plugins:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
+| `screens` | `true` | Control the displays' brightness. Off, no display is read or written and the bar shows only the keyboard, if any. |
 | `auto` | `true` | Follow the room, on a display seen for the first time. Each display then keeps its own. |
+| `keyboard` | `false` | Control the keyboard backlight from the laptop's sensor. See [Keyboard backlight](#keyboard-backlight). |
 
 Each display's own Auto and preference (your correction to the curve, a
 bend in [-1, 1]; see [docs/design.md](docs/design.md), stage 6) are kept
@@ -67,7 +71,8 @@ omarchy-shell auto-brightness setFor eDP-1 40   # as if you moved the slider
 
 `toggle`, `enable`, `disable`, `forget` and `set 40` do the same on the
 primary display: the Studio Display if active, else the laptop panel, else
-the first other active one.
+the first other active one. `keyboard` in place of an output name acts on
+the keyboard backlight; `status` reports it under `keyboard`.
 
 ## How it works
 
@@ -118,6 +123,30 @@ keeps its record across ports; the laptop panel is keyed as `internal`. A
 display without a serial is keyed by its port too. Two displays reporting
 the same serial are told apart by output name while both are connected.
 
+## Keyboard backlight
+
+With `keyboard` on, the keyboard backlight Omarchy's hotkeys drive, the
+first `*kbd_backlight*` LED, follows the laptop's light sensor:
+
+| | |
+| --- | --- |
+| Curve | 50% in the dark, 30% at 15 lux, 20% at 30; the keys light up below 30 lux and go out above 60, so the edge does not flicker. |
+| Accept | A darker room after 2 s, a brighter one after 4 s. |
+| Fade | Linear, over about a second. |
+| Your choice | The slider or a hotkey is held, whatever the light does, until you lock, close the lid or sleep; a restore button beside the chip shows it. Nothing is learnt: the curve comes back after that, or with the restore button. Manual is only ever chosen on the chip. |
+
+The keyboard row sits on the laptop's bar, or the primary display's while
+the panel is off; with `screens` off it is the widget's only row. The keys
+are driven only while the session is unlocked, a screen is on and the lid
+is open; Omarchy turns them off on lock and restores them on unlock, and
+the plugin waits 2 s after either before taking over again. With the lid
+closed and Auto on they are turned off.
+
+Run one keyboard controller: another, such as the one some Omarchy forks
+ship, would take this one's writes for hotkey presses, and the other way
+round. An external keyboard whose LED name matches `*kbd_backlight*` and
+sorts first is the one driven, as it is for the hotkeys.
+
 Omarchy has open pull requests for built-in auto brightness. If one lands,
 this plugin will shrink to whatever the built-in version does not cover.
 
@@ -132,6 +161,14 @@ this plugin will shrink to whatever the built-in version does not cover.
   cannot tell them apart.
 - Brightness only. The Studio Display has no colour temperature control
   over USB.
+- The keyboard pauses within about 2 s of a lock: the lock screen offers
+  plugins no service and Hyprland no event, so it is asked over IPC every
+  2 s while the keyboard is on Auto. Without Omarchy's lock screen the
+  answer never comes, and the keyboard is not driven. A change made in
+  those 2 s is the level Omarchy saves and restores on unlock; the curve
+  takes over again about 2 s later.
+- The keyboard stays lit in the dark while you are not typing; turning it
+  off when idle is not done yet.
 - With the lid closed the laptop panel is not driven, and its sensor is
   not lent to other displays.
 - Some laptop light sensors read 0 after a resume until their driver is

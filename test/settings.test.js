@@ -18,10 +18,12 @@ function test(name, fn) { tests.push([name, fn]) }
 // Settings with display A's preference `pa` and auto `aa` where given.
 const A = JSON.stringify(["Apple Computer Inc", "StudioDisplay", "0x0000A001"])
 const B = "internal"
+// The switches at their defaults unless `extra` sets them.
+const SWITCHES = { screens: true, keyboard: false, keyboardAuto: true }
 function cfg(auto, pa, extra = {}) {
   const displays = {}
   if (pa !== undefined) displays[A] = { preference: pa }
-  return { auto, displays, ...extra }
+  return { auto, ...SWITCHES, displays, ...extra }
 }
 const prefOf = (settings, id = A) => s.displaySettings(settings, id).preference
 
@@ -38,9 +40,9 @@ function events(state, list) {
 }
 
 test("read applies the defaults and drops what it cannot use", () => {
-  assert.deepEqual(plain(s.read(undefined)), { auto: true, displays: {} })
-  assert.deepEqual(plain(s.read({ auto: false, offset: 7 })), { auto: false, displays: {}, offset: 7 })
-  assert.deepEqual(plain(s.read({ offset: 0 })), { auto: true, displays: {} })
+  assert.deepEqual(plain(s.read(undefined)), { auto: true, ...SWITCHES, displays: {} })
+  assert.deepEqual(plain(s.read({ auto: false, offset: 7 })), { auto: false, ...SWITCHES, displays: {}, offset: 7 })
+  assert.deepEqual(plain(s.read({ offset: 0 })), { auto: true, ...SWITCHES, displays: {} })
   const r = s.read({ displays: { [A]: { auto: false, preference: 0.125, junk: 1 }, bad: 3, [B]: { preference: "x" } } })
   assert.deepEqual(plain(r.displays), { [A]: { auto: false, preference: 0.125 }, [B]: {} })
 })
@@ -195,7 +197,7 @@ test("migrating the old offset removes it in the same write", () => {
 test("the entry written keeps unrelated keys and drops a migrated offset", () => {
   const entry = { id: "x", auto: true, offset: 6, other: 1 }
   const out = s.entryWith(entry, cfg(false, 0.43))
-  assert.deepEqual(plain(out), { id: "x", other: 1, auto: false, displays: { [A]: { preference: 0.43 } } })
+  assert.deepEqual(plain(out), { id: "x", other: 1, auto: false, ...SWITCHES, displays: { [A]: { preference: 0.43 } } })
 })
 
 test("a preference outside [-1, 1] is not read: not one Control.js could have learned", () => {
@@ -215,6 +217,32 @@ test("the legacy offset belongs to the display the old controller drove, never a
   assert.equal(s.legacyOwner([{ ...apple, active: false }, panel]), B)
   assert.equal(s.legacyOwner([ddc]), null)
   assert.equal(s.legacyOwner([]), null)
+})
+
+test("screens default on, the keyboard off and its Auto on; only booleans are read", () => {
+  const r = plain(s.read({ screens: false, keyboard: true, keyboardAuto: false }))
+  assert.deepEqual([r.screens, r.keyboard, r.keyboardAuto], [false, true, false])
+  const junk = plain(s.read({ screens: "no", keyboard: 1, keyboardAuto: null }))
+  assert.deepEqual([junk.screens, junk.keyboard, junk.keyboardAuto], [true, false, true])
+})
+
+test("the switches are ours to change and are persisted", () => {
+  const r = s.own(s.start(cfg(true)), { keyboard: true, keyboardAuto: false })
+  assert.equal(r.changed, true)
+  assert.deepEqual([r.persist.keyboard, r.persist.keyboardAuto, r.persist.screens], [true, false, true])
+  const out = s.entryWith({ id: "x", screens: true, keyboard: false }, r.persist)
+  assert.deepEqual([out.id, out.screens, out.keyboard, out.keyboardAuto], ["x", true, true, false])
+})
+
+test("a switch flipped in Setup merges with a pending write of ours", () => {
+  let st = s.start(cfg(true))
+  st = s.own(st, { displays: { [A]: { preference: 0.2 } } }).state
+  // Setup turns the keyboard on from a config that predates our write.
+  const r = s.configEvent(st, cfg(true, undefined, { keyboard: true }))
+  assert.equal(r.changed, true)
+  assert.equal(r.state.held.keyboard, true)
+  assert.equal(prefOf(r.state.held), 0.2)
+  assert.equal(r.restore, true)
 })
 
 let failed = 0

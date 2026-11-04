@@ -123,6 +123,49 @@ test("ids cannot collide by joining fields", () => {
 
 // EDIDs as `od -An -v -tx1` prints them: a base block of zeros, then
 // extensions. An HDR Static Metadata data block with the given code values:
+const led = { name: "acme::kbd_backlight", max: 3 }
+const kbd = (o = {}) => plain(inv.keyboardState({ led, sensors: [chassisAls], lid: "open", locked: false, monitors: [panel()], ...o }))
+
+test("the keyboard is driven with the lid open, unlocked, a screen on", () => {
+  assert.deepEqual(kbd(), { present: true, sensor: chassisAls.path, active: true, blank: false, paused: null })
+  // The panel off for an external one: the keys are still typed on.
+  assert.equal(kbd({ monitors: [panel({ disabled: true }), studio()] }).active, true)
+})
+
+test("the keyboard pauses while locked, every screen blanked, or either unknown", () => {
+  assert.equal(kbd({ locked: true }).active, false)
+  assert.equal(kbd({ locked: null }).active, false)
+  assert.equal(kbd({ monitors: [panel({ dpmsStatus: false }), studio({ disabled: true })] }).active, false)
+  assert.equal(kbd({ monitors: [] }).active, false)
+  assert.equal(kbd({ locked: true }).blank, false, "the lock turns it off itself")
+})
+
+test("a paused keyboard says why, the lid first", () => {
+  assert.equal(kbd({ locked: true }).paused, "locked")
+  assert.equal(kbd({ locked: null }).paused, "lock unknown")
+  assert.equal(kbd({ monitors: [panel({ dpmsStatus: false })] }).paused, "screens off")
+  assert.equal(kbd({ lid: "unknown", locked: true }).paused, "lid unknown")
+  assert.equal(kbd({ lid: "closed" }).paused, "lid closed")
+  assert.equal(kbd({ sensors: [] }).paused, "no sensor")
+})
+
+test("a closed lid blanks the keyboard; an unknown lid, or no chassis sensor, only pauses it", () => {
+  assert.deepEqual(kbd({ lid: "closed" }), { present: true, sensor: null, active: false, blank: true, paused: "lid closed" })
+  assert.deepEqual(kbd({ lid: "unknown" }), { present: true, sensor: null, active: false, blank: false, paused: "lid unknown" })
+  assert.deepEqual(kbd({ sensors: [studioAls] }), { present: true, sensor: null, active: false, blank: false, paused: "no sensor" })
+})
+
+test("without a keyboard LED there is nothing", () => {
+  assert.deepEqual(kbd({ led: null }), { present: false, sensor: null, active: false, blank: false, paused: null })
+})
+
+test("an active keyboard keeps the chassis sensor sampled, the panel off", () => {
+  const list = inv.displays([panel({ disabled: true }), studio()], [chassisAls, studioAls], "open", {}, {})
+  assert.deepEqual(plain(inv.sensorsInUse(list)), [studioAls.path])
+  assert.deepEqual(plain(inv.sensorsInUse(list, kbd())), [studioAls.path, chassisAls.path])
+  assert.deepEqual(plain(inv.sensorsInUse(list, kbd({ locked: true }))), [studioAls.path])
+})
+
 const hdrBlock = (maxCv, minCv) =>
   minCv === undefined ? [0xe4, 0x06, 0x05, 0x01, maxCv] : [0xe6, 0x06, 0x05, 0x01, maxCv, maxCv, minCv]
 // A CTA-861 extension holding data blocks; `end` overrides where its data

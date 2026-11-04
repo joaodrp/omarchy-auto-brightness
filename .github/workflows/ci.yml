@@ -32,6 +32,9 @@ jobs:
       - name: Endpoint unit tests
         run: node test/endpoint.test.js
 
+      - name: Keyboard unit tests
+        run: node test/keyboard.test.js
+
       - name: Manifest matches the repo and the README
         run: python3 .github/check-manifest.py
 

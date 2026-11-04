@@ -63,7 +63,7 @@ service = (ROOT / manifest["entryPoints"]["service"]).read_text() + (ROOT / "Set
 read_keys = set(re.findall(r"\bentry\.([a-zA-Z]+)\b", service)) - {"id"}
 # Read on purpose without being a Setup setting: `displays` is kept by the
 # service per display, `offset` is migrated from before it existed.
-STORED = {"displays"}
+STORED = {"displays", "keyboardAuto"}
 LEGACY = {"offset"}
 read_keys -= STORED | LEGACY
 for key in read_keys - set(schema):

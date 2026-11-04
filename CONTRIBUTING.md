@@ -11,17 +11,20 @@ model, how it is connected, what `hyprctl monitors -j` reports for `make` and
 | File | |
 | --- | --- |
 | `manifest.json` | Plugin contract: kinds, entry points, settings schema and defaults |
-| `Service.qml` | Runs the probe, samples the sensors, keeps one `DisplayChannel` per display, persists settings, IPC |
+| `Service.qml` | Runs the probe, samples the sensors, keeps one `DisplayChannel` per display and the `KeyboardChannel`, persists settings, IPC |
 | `DisplayChannel.qml` | One display: its hardware operations, ramp and learning |
-| `probe` | Prints the outputs, sensors, lid, EDIDs and backlight the inventory works from. Bash, no dependencies beyond what Omarchy ships |
+| `KeyboardChannel.qml` | The keyboard backlight: its hardware operations and fade |
+| `probe` | Prints the outputs, sensors, lid, EDIDs, backlight and keyboard LED the inventory works from. Bash, no dependencies beyond what Omarchy ships |
 | `Settings.js` | Per-display settings and what the service persists, apart from the shell's config echoes. Qt-free |
 | `test/settings.test.js` | Unit tests for `Settings.js`, run under node |
 | `Control.js` | The control pipeline as pure functions: smoothing, hysteresis, debounce, the curve in nits, ramp and learning. Qt-free |
 | `test/control.test.js` | Unit tests for `Control.js`, run under node |
-| `Inventory.js` | Which displays exist, which are active, how each is driven and which sensor serves it. Qt-free |
+| `Inventory.js` | Which displays exist, which are active, how each is driven and which sensor serves it; when the keyboard is driven. Qt-free |
 | `test/inventory.test.js` | Unit tests for `Inventory.js`, run under node |
 | `Endpoint.js` | Scheduling for one display's brightness writes and read-backs: one at a time, latest wins, backoff, per-kind policy. Qt-free |
 | `test/endpoint.test.js` | Unit tests for `Endpoint.js`, run under node |
+| `Keyboard.js` | The keyboard backlight's curve, thresholds, pauses and holds. Qt-free |
+| `test/keyboard.test.js` | Unit tests for `Keyboard.js`, run under node |
 | `Panel.qml` | The bar icon and the panel |
 | `docs/design.md` | Why each stage of the control pipeline is the way it is, with sources |
 | `preview.png` | The listing image the [plugin marketplace](https://plugins.omarchy.org/publish.html) reads from the repository root |
@@ -54,6 +57,7 @@ node test/settings.test.js         # what the service sends and persists
 node test/control.test.js          # the control pipeline in JS
 node test/inventory.test.js        # displays, sensors, identity, EDID luminance
 node test/endpoint.test.js         # write and read-back scheduling per display
+node test/keyboard.test.js         # the keyboard backlight's curve, pauses and holds
 omarchy plugin validate "$PWD"
 python3 .github/check-manifest.py  # manifest, README table and Service.qml reads agree
 
