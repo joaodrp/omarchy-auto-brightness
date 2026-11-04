@@ -55,6 +55,15 @@ test("DPMS off is inactive, and an unused sensor is not sampled", () => {
   assert.deepEqual(plain(inv.sensorsInUse(list)), [])
 })
 
+test("only a display that is merely blanked is asleep, to keep its widget", () => {
+  const asleep = (m, lid = "open") => inv.displays([m], [], lid, {}, {})[0].asleep
+  assert.equal(asleep(studio({ dpmsStatus: false })), true)
+  assert.equal(asleep(studio()), false, "on")
+  assert.equal(asleep(studio({ disabled: true, dpmsStatus: false })), false, "disabled is gone")
+  assert.equal(asleep(panel({ dpmsStatus: false }), "closed"), false, "a closed lid is gone")
+  assert.equal(asleep(panel({ dpmsStatus: false })), true)
+})
+
 test("a closed lid makes the panel inactive even while Hyprland keeps it enabled", () => {
   const d = byName(inv.displays([panel(), studio()], [chassisAls, studioAls], "closed", {}, {}))
   assert.equal(d["eDP-1"].active, false)

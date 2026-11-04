@@ -114,7 +114,8 @@ the right curve only if they share a room. Its preference absorbs a
 constant difference.
 
 A display stops being driven while it is off: disabled, DPMS off, or the
-laptop panel with the lid closed. Turning it back on, waking from sleep or
+laptop panel with the lid closed. Only blanked, by DPMS or the lock, it
+keeps its widget, and an open pop-up stays open. Turning it back on, waking from sleep or
 plugging it in reads its brightness back before any change. Outputs are
 rescanned on Hyprland's monitor events and every 10 s.
 
