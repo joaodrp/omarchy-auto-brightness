@@ -31,7 +31,9 @@ Item {
   readonly property bool autoActive: auto && hasSensor
   property real lux: 0                // accepted lux
   property int brightness: 0          // percent, as last written or read
-  property real target: 0             // percent the curve asks for
+  // Percent auto drives to, and its points over the plain curve for the chip.
+  readonly property real target: accepted.accepted === null ? 0 : Control.goal(accepted.accepted, lum, preference, held)
+  readonly property int points: accepted.accepted === null ? 0 : Control.points(accepted.accepted, lum, preference, held)
   property bool known: false          // brightness has been read
 
   // A learned preference to keep.
@@ -53,6 +55,12 @@ Item {
   property var inflight: null
   // A choice made before any light level was accepted: learned on the first.
   property var pendingChoice: null
+  // The user's last choice, { lux, pct }, held exactly until the accepted
+  // light level moves on (Control.goal).
+  property var held: null
+  // The preference change this display is itself about to cause, once: any
+  // other arriving, from Setup or a reset, supersedes the hold.
+  property var learnt: null
   // Set by an explicit reset or Auto toggle: whatever the next read-back
   // finds is adopted, not learned, since any press it reveals came before.
   property bool quiet: false
@@ -73,6 +81,7 @@ Item {
     known = false
     lastSample = -1
     pendingChoice = null
+    held = null
     if (inflight) cancel()
     pump()
   }
@@ -101,6 +110,7 @@ Item {
     if (!endpoint) return
     quiet = true
     pendingChoice = null
+    held = null
     endpoint = Endpoint.requestRead(endpoint)
     pump()
   }
@@ -122,13 +132,18 @@ Item {
 
   // Another sensor, or none: its light is accepted afresh too.
   function resetLight() {
+    held = null
     accepted = { accepted: null }
     lastSample = -1
     invalidate()
   }
 
   onAutoActiveChanged: if (!autoActive) resetLight()
-  onPreferenceChanged: invalidate()
+  onPreferenceChanged: {
+    if (preference === learnt) learnt = null
+    else held = null
+    invalidate()
+  }
   onLumChanged: invalidate()
 
   // The user's hand, still on its way to the display: nothing automatic
@@ -143,12 +158,12 @@ Item {
     lastSample = t
     accepted = Control.accept(accepted, filtered, t)
     lux = accepted.accepted
+    if (held && held.lux !== accepted.accepted) held = null
     if (pendingChoice !== null) {
-      if (autoActive) learned(Control.learn(pendingChoice, accepted.accepted, lum))
+      if (autoActive) keep(pendingChoice)
       pendingChoice = null
     }
     accepting()
-    target = Control.target(accepted.accepted, lum, preference)
     if (!autoActive || !known || userPending()) return
     if (!policy.fade) {
       // Only the final value, and the endpoint spaces the writes out.
@@ -173,8 +188,8 @@ Item {
     playFrames()
   }
 
-  // The user picked `pct`: written at once, and with auto on it becomes the
-  // preference at the light level accepted now.
+  // The user picked `pct`: written at once, and with auto on held and learned
+  // at the light level accepted now.
   function setBrightness(pct) {
     if (!endpoint || !isFinite(pct)) return
     var p = Math.max(1, Math.min(100, Math.round(pct)))
@@ -186,12 +201,12 @@ Item {
     pump()
   }
 
-  // A brightness the user chose, by hand or by hotkey: with auto on it
-  // becomes the preference, now or at the first light level accepted.
+  // A brightness the user chose, by hand or by hotkey: with auto on it is
+  // held and learned, now or at the first light level accepted.
   function choose(p) {
     if (!autoActive) return
     if (accepted.accepted === null) pendingChoice = p
-    else learned(Control.learn(p, accepted.accepted, lum))
+    else keep(p)
   }
 
   // The units the display is at or on its way to: the automatic write queued
@@ -200,6 +215,24 @@ Item {
     if (endpoint.auto !== null) return endpoint.auto
     var b = endpoint.busy
     return b && b.op === "write" ? b.units : endpoint.value
+  }
+
+  // Hold `p` at the light level accepted now, and learn what it says about
+  // the rest of the curve, if anything can.
+  function keep(p) {
+    held = { lux: accepted.accepted, pct: p }
+    var fit = Control.learn(p, accepted.accepted, lum)
+    if (fit === null) return
+    // No change, so no notification to consume the exemption.
+    learnt = fit !== preference ? fit : null
+    learned(fit)
+  }
+
+  // A legacy offset migrating to `preference`: what it gave, `pct`, is held,
+  // since the bend may not reach it.
+  function holdLegacy(pct, preference) {
+    held = { lux: accepted.accepted, pct: pct }
+    learnt = preference !== channel.preference ? preference : null
   }
 
   function playFrames() {

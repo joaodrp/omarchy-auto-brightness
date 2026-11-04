@@ -51,39 +51,77 @@ test("missing or nonsensical EDID luminance falls back to the curve's own", () =
 })
 
 test("targets clamp to the display's range", () => {
-  assert.equal(c.target(0, legacy, -90), 1)
-  assert.equal(c.target(5000, legacy, 50), 100)
+  assert.equal(c.target(0, legacy, -1), 1)
+  assert.equal(c.target(5000, legacy, 1), 100)
 })
 
-test("a preference is a ratio, so it holds at every light level", () => {
-  // Chosen 30% at 20 lux, where the curve gives 14%.
-  const p = c.learn(30, 20, legacy)
-  assert.equal(p, 114.29)
-  near(c.target(20, legacy, p), 30, 0.1, "back at 20 lux")
-  // Twice the curve's nits in the dark, not 16 points over it.
-  near(c.target(0, legacy, p), 10.7, 0.1, "in the dark")
+test("a preference bends the curve: a dark-room choice stays modest in daylight", () => {
+  // Chosen 35% at 16 lux, where the curve gives about 13%.
+  const p = c.learn(35, 16, legacy)
+  near(c.target(16, legacy, p), 35, 0.3, "back at 16 lux")
+  // About as many points over the curve in a lit room, not 3x its light.
+  const room = c.target(200, legacy, p)
+  assert.ok(room > c.target(200, legacy, 0) + 15 && room < 65, `200 lux: ${room}`)
+  assert.ok(c.target(1500, legacy, p) < 90, "1500 lux stays below full")
+  // The top stays put; the dark end moves with the rest.
+  assert.equal(c.target(5000, legacy, p), 100)
+  assert.ok(c.target(0, legacy, p) > c.target(0, legacy, 0))
+})
+
+test("a dimmer choice bends it down, gently at the top", () => {
+  const p = c.learn(15, 200, legacy)
+  assert.ok(p < 0, `preference ${p}`)
+  near(c.target(200, legacy, p), 15, 0.3, "back at 200 lux")
+  assert.ok(c.target(0, legacy, p) >= 1)
+  assert.equal(c.target(5000, legacy, p), 100)
+})
+
+test("a preference is bounded, as Android bounds its gamma", () => {
+  assert.equal(c.learn(100, 0, legacy), 1)
+  assert.equal(c.learn(1, 100, legacy), -1)
+})
+
+test("a choice the curve's top cannot express is not learned", () => {
+  assert.equal(c.learn(60, 5000, legacy), null)
+  assert.equal(c.learn(60, 20000, studio), null)
 })
 
 test("a preference learned on one display maps through its own peak", () => {
   const p = c.learn(c.target(100, laptop, 0) * 1.5, 100, laptop)
-  near(c.nitsAt(c.target(800, laptop, p), laptop), c.curve(800) * (1 + p / 100), 1e-9, "laptop at 800 lux")
+  near(c.target(100, laptop, p), c.target(100, laptop, 0) * 1.5, 0.3, "laptop at 100 lux")
+  const gamma = Math.pow(c.config.maxGamma, -p)
+  near(c.nitsAt(c.target(800, laptop, p), laptop), 600 * Math.pow(c.curve(800) / 600, gamma), 1e-6, "laptop at 800 lux")
 })
 
-test("a low choice in bright light is kept, without cancelling the curve", () => {
-  for (const lum of [legacy, c.luminance(300, 0), c.luminance(100, 0)]) {
-    const p = c.learn(1, 5000, lum)
-    assert.ok(p > -100, `preference ${p}`)
-    near(c.target(5000, lum, p), 1, 0.05, `back at 5000 lux, peak ${lum.peak}`)
-  }
+test("a choice is held exactly while the light level it was made at stands", () => {
+  const held = { lux: 16, pct: 35 }
+  assert.equal(c.goal(16, legacy, 0.2, held), 35)
+  assert.equal(c.goal(5000, legacy, 0, { lux: 5000, pct: 60 }), 60)
+  assert.equal(c.goal(20, legacy, 0, held), c.target(20, legacy, 0))
+  assert.equal(c.goal(20, legacy, 0, null), c.target(20, legacy, 0))
 })
 
-test("an old additive offset converts to the ratio that keeps brightness still", () => {
+test("an old additive offset converts to the preference that keeps brightness still", () => {
   assert.equal(c.preferenceFromOffset(0, 20, legacy), 0)
   // The old offset was on the old percent table: +6 at 20 lux was 20%.
   for (const lum of [legacy, laptop]) {
     const p = c.preferenceFromOffset(6, 20, lum)
-    near(c.target(20, lum, p), 20, 0.1, `same brightness at the lux it converted at, peak ${lum.peak}`)
+    near(c.target(20, lum, p), 20, 0.3, `same brightness at the lux it converted at, peak ${lum.peak}`)
   }
+  // One no bend can express is held instead: brightness stays where it was.
+  assert.equal(c.preferenceFromOffset(-30, 5000, legacy), 0)
+  assert.equal(c.legacyPct(-30, 5000), 70)
+  assert.equal(c.goal(5000, legacy, 0, { lux: 5000, pct: c.legacyPct(-30, 5000) }), 70)
+  assert.equal(c.legacyPct(6, 20), 20)
+})
+
+test("the points over the curve, as the chip shows them", () => {
+  const p = c.learn(35, 16, legacy)
+  assert.equal(c.points(16, legacy, p, null), 35 - Math.round(c.target(16, legacy, 0)))
+  assert.equal(c.points(16, legacy, 0, null), 0)
+  assert.equal(c.points(16, legacy, 0, { lux: 16, pct: 40 }), 40 - Math.round(c.target(16, legacy, 0)))
+  // As the slider shows each side: 7% and 3% are 4 points apart.
+  assert.equal(c.points(1, legacy, -0.2, null), Math.round(c.target(1, legacy, -0.2)) - Math.round(c.target(1, legacy, 0)))
 })
 
 test("smoothing weighs 0.25 per half second, and follows elapsed time", () => {

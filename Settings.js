@@ -11,8 +11,8 @@
 //
 // Settings: { auto, displays, offset? }
 //   auto      Auto for a display seen for the first time
-//   displays  per display id: { auto?, preference? }, preference the ratio to
-//             the curve in percent (Control.js)
+//   displays  per display id: { auto?, preference? }, preference the curve's
+//             bend in [-1, 1] (Control.js)
 //   offset    the additive offset from before displays were kept apart, until
 //             it is migrated onto the display it was learned on
 // Fields are compared and merged by path: `auto`, `offset`, and
@@ -41,7 +41,7 @@ function read(config) {
     if (!isObject(d)) continue
     var record = {}
     if (typeof d.auto === "boolean") record.auto = d.auto
-    if (typeof d.preference === "number" && isFinite(d.preference)) record.preference = d.preference
+    if (typeof d.preference === "number" && d.preference >= -1 && d.preference <= 1) record.preference = d.preference
     displays[id] = record
   }
   var settings = { auto: entry.auto !== false, displays: displays }
