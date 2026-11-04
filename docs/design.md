@@ -178,9 +178,14 @@ one hop every 2 s.
 
 A manual change while auto is on does two things, as on Android:
 
-- **It is held.** The chosen brightness stays exactly as set until the
-  accepted light level changes; Android inserts the user's point into its
-  curve for the same reason.
+- **It is held.** The chosen brightness stays exactly as set while the
+  accepted light stays within 0.4x to 1.6x of where it was chosen, or up
+  to 1.6 lux for a choice made below 1 lux. The band borrows Android's
+  default short-term model ratio (`SHORT_TERM_MODEL_THRESHOLD_RATIO` =
+  0.6); Android instead bends its mapping around the user's point and
+  checks the band when that model is due to be reset. The band is wide because a laptop's sensor can see the panel's
+  own light: brightening it from 8% to 45% in a dim room has been seen to
+  raise the reading from 4.8 to 6 lux, past the hysteresis.
 - **It bends the curve.** It becomes that display's preference `p`, in
   [-1, 1]: the curve's luminance, as a fraction of its 600-nit top, is
   raised to the power `3^-p`, and `p` is solved so the bent curve passes

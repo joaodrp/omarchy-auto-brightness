@@ -56,7 +56,7 @@ Item {
   // A choice made before any light level was accepted: learned on the first.
   property var pendingChoice: null
   // The user's last choice, { lux, pct }, held exactly until the accepted
-  // light level moves on (Control.goal).
+  // light level moves well away (Control.holding).
   property var held: null
   // The preference change this display is itself about to cause, once: any
   // other arriving, from Setup or a reset, supersedes the hold.
@@ -158,7 +158,7 @@ Item {
     lastSample = t
     accepted = Control.accept(accepted, filtered, t)
     lux = accepted.accepted
-    if (held && held.lux !== accepted.accepted) held = null
+    if (held && !Control.holding(held, accepted.accepted)) held = null
     if (pendingChoice !== null) {
       if (autoActive) keep(pendingChoice)
       pendingChoice = null

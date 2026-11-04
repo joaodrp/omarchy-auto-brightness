@@ -32,7 +32,10 @@ var config = {
   // A preference p in [-1, 1] raises the curve's luminance, as a fraction of
   // its top, to the power maxGamma^-p: Android's
   // config_autoBrightnessAdjustmentMaxGamma default.
-  maxGamma: 3
+  maxGamma: 3,
+  // A choice is held while the accepted lux stays within this ratio of where
+  // it was made, either way: Android's SHORT_TERM_MODEL_THRESHOLD_RATIO.
+  holdRatio: 0.6
 }
 
 // Lux anchors -> nits, interpolated in log2(lux + 1). Tuned on a 600-nit
@@ -86,11 +89,18 @@ function target(lux, lum, preference) {
   return clampPct(pctAt(bent(curve(lux), preference), lum))
 }
 
-// What to drive to: a choice `held` ({ lux, pct }) exactly while the light
-// level it was made at stands, else the bent curve. Android likewise inserts
-// the user's point into its curve.
+// Whether a choice `held` ({ lux, pct }) still stands at `lux`: within
+// holdRatio of where it was made, around at least 1 lux as hysteresis is.
+function holding(held, lux) {
+  if (!held) return false
+  var base = held.lux > 1 ? held.lux : 1
+  return lux >= held.lux * (1 - config.holdRatio) && lux <= base * (1 + config.holdRatio)
+}
+
+// What to drive to: a held choice exactly while it stands, else the bent
+// curve. Android likewise keeps the user's point while the light stays near.
 function goal(lux, lum, preference, held) {
-  return held && held.lux === lux ? held.pct : target(lux, lum, preference)
+  return holding(held, lux) ? held.pct : target(lux, lum, preference)
 }
 
 // Points over the plain curve, as the chip shows them: each side as the

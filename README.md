@@ -78,7 +78,7 @@ uses, smooths it once, and for each display it serves:
 | --- | --- |
 | Smooth | Exponential average, settles in about 2 s. Per sensor. |
 | Accept | Only a change of +10% or -20%, held for 4 s or 8 s. |
-| Map | Lux to luminance, log-shaped: 30 nits in the dark, 144 at 100 lux, 600 at 5000. Bent by the display's preference, then to percent between the display's floor and peak. A manual choice is held until the light level changes. |
+| Map | Lux to luminance, log-shaped: 30 nits in the dark, 144 at 100 lux, 600 at 5000. Bent by the display's preference, then to percent between the display's floor and peak. A manual choice is held while the light stays within 0.4x to 1.6x of where it was made, or up to 1.6 lux below 1 lux. |
 | Ramp | 20 points per second up, 13 down, capped at 2 s and 3 s. Written as evenly paced steps, up to 60 a second, in the display's own units and, where those are fine, in log luminance, so the fade is as smooth as the display allows. |
 
 The evidence for each stage is in [docs/design.md](docs/design.md). The
