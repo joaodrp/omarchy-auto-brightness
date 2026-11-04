@@ -156,6 +156,14 @@ test("a brighter room is accepted only after 4 s above the band; darker after 8 
   assert.equal(c.accept(dark, 1, 8).accepted, 1)
 })
 
+test("a caller can set its own debounce times", () => {
+  const fast = { brighten: 4, darken: 2 }
+  const dark = { accepted: 100, dir: -1, since: 0 }
+  assert.equal(c.accept(dark, 1, 1, fast).accepted, 100)
+  assert.equal(c.accept(dark, 1, 2, fast).accepted, 1)
+  assert.equal(c.accept({ accepted: 10, dir: 1, since: 0 }, 90, 3, fast).accepted, 10)
+})
+
 test("a 5% wobble is ignored and resets nothing", () => {
   const st = c.accept({ accepted: 100, dir: 0, since: 0 }, 105, 30)
   assert.deepEqual(plain(st), { accepted: 100, dir: 0, since: 0 })

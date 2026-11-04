@@ -51,22 +51,24 @@ var defaultLuminance = { peak: 600, floor: 0 }
 function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v) }
 function clampPct(v) { return clamp(v, 1, 100) }
 
-function curve(lux) {
-  var n = luxPoints.length
-  if (lux <= luxPoints[0]) return nitsPoints[0]
-  if (lux >= luxPoints[n - 1]) return nitsPoints[n - 1]
+function curve(lux) { return interpolate(lux, luxPoints, nitsPoints) }
+
+// Piecewise linear in log2(lux + 1), flat past either end.
+function interpolate(lux, xs, ys) {
+  var n = xs.length
+  if (lux <= xs[0]) return ys[0]
+  if (lux >= xs[n - 1]) return ys[n - 1]
   var x = Math.log2(lux + 1)
   for (var i = 1; i < n; i++) {
-    if (lux <= luxPoints[i]) {
-      var xa = Math.log2(luxPoints[i - 1] + 1)
-      var xb = Math.log2(luxPoints[i] + 1)
-      return nitsPoints[i - 1] + (x - xa) / (xb - xa) * (nitsPoints[i] - nitsPoints[i - 1])
+    if (lux <= xs[i]) {
+      var xa = Math.log2(xs[i - 1] + 1)
+      var xb = Math.log2(xs[i] + 1)
+      return ys[i - 1] + (x - xa) / (xb - xa) * (ys[i] - ys[i - 1])
     }
   }
-  return nitsPoints[n - 1]
+  return ys[n - 1]
 }
 
-// A display's luminance model, from EDID values that may be missing or wrong.
 function luminance(peak, floor) {
   if (!(peak > 0)) return defaultLuminance
   var f = floor >= 0 && floor < peak ? floor : 0
@@ -144,7 +146,10 @@ function smooth(prev, lux, dt) {
 
 // Hysteresis and debounce, per display.
 //   state: { accepted, dir, since }, accepted null until the first sample
-function accept(state, filtered, now) {
+//   debounce: optional { brighten, darken } seconds, the config's by default
+function accept(state, filtered, now, debounce) {
+  var brighten = debounce ? debounce.brighten : config.brightenDebounce
+  var darken = debounce ? debounce.darken : config.darkenDebounce
   if (state.accepted === null || state.accepted === undefined)
     return { accepted: filtered, dir: 0, since: now }
   var base = state.accepted > 1 ? state.accepted : 1
@@ -152,7 +157,7 @@ function accept(state, filtered, now) {
   if (filtered > state.accepted + base * config.brightenThreshold) dir = 1
   else if (filtered < state.accepted - base * config.darkenThreshold) dir = -1
   var since = dir !== state.dir ? now : state.since
-  if (dir !== 0 && now - since >= (dir > 0 ? config.brightenDebounce : config.darkenDebounce))
+  if (dir !== 0 && now - since >= (dir > 0 ? brighten : darken))
     return { accepted: filtered, dir: 0, since: now }
   return { accepted: state.accepted, dir: dir, since: since }
 }
