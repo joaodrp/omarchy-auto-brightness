@@ -18,7 +18,9 @@ Panel {
   readonly property string screenName: root.QsWindow.window?.screen?.name ?? ""
   // This bar's display, a DisplayChannel, or null.
   readonly property var display: service && screenName ? service.channelOn(screenName) : null
-  readonly property bool displayShown: display?.active ?? false
+  // Shown while only blanked too, so a lock leaves the icon and an open
+  // pop-up as they were.
+  readonly property bool displayShown: (display?.active || display?.asleep) ?? false
   // The keyboard backlight, a KeyboardChannel, on this bar only.
   readonly property var keyboard: service && screenName && service.keyboardScreen === screenName ? service.keyboard : null
   readonly property bool keyboardShown: keyboard?.seen ?? false

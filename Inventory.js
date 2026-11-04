@@ -114,7 +114,9 @@ function assignSensor(kind, sensors, lid, previous) {
 // The displays to drive. `monitors` as `hyprctl monitors all -j` lists them,
 // `edid` maps an output name to its luminance, `previous` maps a display id
 // to the sensor it had. Each display:
-//   { id, name, kind, active, luminance, sensor, sensorReason }
+//   { id, name, kind, active, asleep, luminance, sensor, sensorReason }
+// `asleep` is a display only blanked, by DPMS, as the lock does: not driven,
+// but still there, unlike one disabled or under a closed lid.
 // `kind` is null for a display that cannot be driven, with `error` saying
 // why. Ids are unique: displays sharing a serial are all told apart by their
 // output name while both are connected. Once one is unplugged the other gets
@@ -129,12 +131,14 @@ function displays(monitors, sensors, lid, edid, previous) {
     var id = identity(m)
     if (count[id] > 1) id = id + "@" + m.name
     var kind = kindOf(m, connected)
+    var gone = m.disabled === true || (kind === "panel" && lid === "closed")
     var display = {
       id: id,
       name: m.name,
       kind: kind,
       // A closed lid covers the panel whether or not Hyprland disables it.
-      active: m.disabled !== true && m.dpmsStatus !== false && !(kind === "panel" && lid === "closed"),
+      active: !gone && m.dpmsStatus !== false,
+      asleep: !gone && m.dpmsStatus === false,
       luminance: (edid && edid[m.name]) || null,
       sensor: null,
       sensorReason: null,

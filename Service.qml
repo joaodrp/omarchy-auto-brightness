@@ -247,6 +247,8 @@ Item {
       // Another sensor reads another room: accept its light afresh.
       if (ch.sensorPath !== (d.sensor || "")) ch.resetLight()
       ch.sensorPath = d.sensor || ""
+      // Asleep first: a display blanking never looks gone in between.
+      ch.asleep = d.asleep
       ch.active = d.active
       next[d.id] = ch
       order.push(ch)
@@ -394,7 +396,12 @@ Item {
       if (root.tearingDown) return
       var m = exitCode === 0 ? /^\s*(true|false)\s*$/i.exec(lockOut.text) : null
       var next = m ? m[1].toLowerCase() === "true" : null
-      if (next !== root.locked) { root.locked = next; root.applyFacts() }
+      if (next === root.locked) return
+      root.locked = next
+      root.applyFacts()
+      // The lock blanks the screens and the unlock wakes them, with no
+      // event for either: look now rather than at the next scan.
+      root.probe()
     }
   }
   Timer {

@@ -15,6 +15,7 @@ Item {
   property string name: ""
   property string kind: ""            // apple, panel or ddc
   property bool active: false
+  property bool asleep: false         // only blanked, by DPMS: its widget stays
   property var luminance: null        // { peak, floor } nits, or null
   property string backlight: ""       // panel only
   property int levels: 100
