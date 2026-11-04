@@ -28,6 +28,7 @@ var config = {
   dimRate: 13,
   dimCap: 3,
   samplePeriod: 0.5,       // seconds between sensor samples
+  sensorDeadline: 3,       // seconds without a good reading before a sensor is reported
   maxFrameRate: 60,        // past what the eye resolves as steps
   // A preference p in [-1, 1] raises the curve's luminance, as a fraction of
   // its top, to the power maxGamma^-p: Android's
@@ -154,6 +155,16 @@ function accept(state, filtered, now) {
   if (dir !== 0 && now - since >= (dir > 0 ? config.brightenDebounce : config.darkenDebounce))
     return { accepted: filtered, dir: 0, since: now }
   return { accepted: state.accepted, dir: dir, since: since }
+}
+
+// Whether a sensor is overdue at `t`, and its state after the check.
+//   state: { good, checked }, the times of its last good reading and check
+// Checks run every sample period; a longer gap since the last one means
+// nothing was sampling, a suspend or a stalled shell, not that the sensor
+// failed, so its clock restarts.
+function sensorCheck(state, t) {
+  var good = t - state.checked > 4 * config.samplePeriod ? t : state.good
+  return { state: { good: good, checked: t }, stale: t - good > config.sensorDeadline }
 }
 
 // Seconds since the previous sample, for the ramp: one sample period for the
