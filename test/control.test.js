@@ -231,6 +231,24 @@ test("the first sample after a start steps one sample period, not the whole cap"
   near(step.brightness, 80 - rate * c.config.samplePeriod, 1e-9, "after one step")
 })
 
+test("a sensor with no good reading for 3 s is stale, but a suspend is not its fault", () => {
+  // Checked every sample period, last good reading at 10 s.
+  let st = { good: 10, checked: 10 }
+  let r
+  for (let t = 10.5; t <= 13; t += 0.5) { r = c.sensorCheck(st, t); st = r.state }
+  assert.equal(r.stale, false, "3 s without a good reading is the limit")
+  r = c.sensorCheck(st, 13.5)
+  assert.equal(r.stale, true, "past it")
+  // A suspend: 12 s with no check at all. Its clock restarts on waking.
+  r = c.sensorCheck({ good: 30, checked: 30.5 }, 42.5)
+  assert.equal(r.stale, false)
+  assert.equal(r.state.good, 42.5)
+  // And then fails for real if nothing good arrives.
+  st = r.state
+  for (let t = 43; t <= 46; t += 0.5) { r = c.sensorCheck(st, t); st = r.state }
+  assert.equal(r.stale, true)
+})
+
 let failed = 0
 for (const [name, fn] of tests) {
   try { fn(); console.log("ok   " + name) } catch (e) { failed++; console.log("FAIL " + name + "\n     " + e.message) }

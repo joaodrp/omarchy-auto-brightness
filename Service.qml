@@ -242,7 +242,7 @@ Item {
       var path = inUse[j]
       var sampled = sensors[path]
       if (sampled && sampled.sensor.file !== byPath[path].file) { sampled.view.destroy(); sampled = null }
-      if (!sampled) sampled = { sensor: byPath[path], view: sensorComponent.createObject(root, { path: byPath[path].file, sensorPath: path }), filtered: null, at: -1, good: now() }
+      if (!sampled) sampled = { sensor: byPath[path], view: sensorComponent.createObject(root, { path: byPath[path].file, sensorPath: path }), filtered: null, at: -1, good: now(), checked: now(), stale: false }
       else sampled.sensor = byPath[path]
       next[path] = sampled
     }
@@ -258,15 +258,21 @@ Item {
   }
 
   // A sensor with no good reading for 3 s, failed, invalid or hung, is
-  // reported on every display it serves. A hung read is left to finish: the
-  // view folds reloads into it, and restarting it cannot interrupt the
-  // kernel, only tie up another reader thread.
-  readonly property real sensorDeadline: 3
+  // reported on every display it serves (Control.sensorCheck). A hung read
+  // is left to finish: the view folds reloads into it, and restarting it
+  // cannot interrupt the kernel, only tie up another reader thread.
   function checkSensors() {
     var t = now()
+    for (var path in sensors) {
+      var sampled = sensors[path]
+      var r = Control.sensorCheck({ good: sampled.good, checked: sampled.checked }, t)
+      sampled.good = r.state.good
+      sampled.checked = r.state.checked
+      sampled.stale = r.stale
+    }
     for (var id in channels) {
       var ch = channels[id], used = sensors[ch.sensorPath]
-      var message = used && t - used.good > sensorDeadline ? "Cannot read the light sensor" : ""
+      var message = used && used.stale ? "Cannot read the light sensor" : ""
       if (ch.sensorError !== message) ch.sensorError = message
     }
   }
