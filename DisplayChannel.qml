@@ -131,6 +131,16 @@ Item {
     return known ? brightness : ramp.brightness
   }
 
+  // Read the display back soon, as after a hotkey: what it finds is adopted
+  // as any read-back's is.
+  // One already running answers it: a newer request would discard it, and
+  // a slow display would never be read.
+  function refresh() {
+    if (!endpoint || !active || (endpoint.busy && endpoint.busy.op === "read")) return
+    endpoint = Endpoint.requestRead(endpoint)
+    pump()
+  }
+
   // Another sensor, or none: its light is accepted afresh too.
   function resetLight() {
     held = null

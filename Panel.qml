@@ -196,6 +196,24 @@ Panel {
   implicitWidth: available ? button.implicitWidth : 0
   implicitHeight: available ? button.implicitHeight : 0
 
+  // While open, the sliders follow hotkeys: nothing announces a change, so
+  // read back often, as often as each kind affords. A sysfs read is cheap,
+  // every half second; the Studio's is a sudo call, every second; DDC/CI
+  // keeps its own pace.
+  property int refreshTick: 0
+  Timer {
+    interval: 500
+    repeat: true
+    running: root.opened
+    onTriggered: {
+      root.refreshTick++
+      if (root.keyboardShown) root.keyboard.refresh()
+      var d = root.display
+      if (!root.displayShown || !d) return
+      if (d.kind === "panel" || (d.kind === "apple" && root.refreshTick % 2 === 0)) d.refresh()
+    }
+  }
+
   // Dragging sends at most one value per beat; the display takes one write
   // at a time anyway.
   Timer {
