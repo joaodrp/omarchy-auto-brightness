@@ -93,12 +93,24 @@ test("a preference learned on one display maps through its own peak", () => {
   near(c.nitsAt(c.target(800, laptop, p), laptop), 600 * Math.pow(c.curve(800) / 600, gamma), 1e-6, "laptop at 800 lux")
 })
 
-test("a choice is held exactly while the light level it was made at stands", () => {
+test("a choice is held exactly while the light stays near where it was made", () => {
   const held = { lux: 16, pct: 35 }
   assert.equal(c.goal(16, legacy, 0.2, held), 35)
   assert.equal(c.goal(5000, legacy, 0, { lux: 5000, pct: 60 }), 60)
-  assert.equal(c.goal(20, legacy, 0, held), c.target(20, legacy, 0))
-  assert.equal(c.goal(20, legacy, 0, null), c.target(20, legacy, 0))
+  assert.equal(c.goal(16, legacy, 0, null), c.target(16, legacy, 0))
+  // Android's short-term model band, 0.4x to 1.6x: a screen's own light on
+  // the laptop's sensor, 4.8 -> 6 lux, keeps the choice.
+  assert.equal(c.goal(6, legacy, 1, { lux: 4.8, pct: 45 }), 45)
+  assert.equal(c.goal(25.6, legacy, 0, held), 35)
+  assert.equal(c.goal(6.4, legacy, 0, held), 35)
+  assert.equal(c.goal(26, legacy, 0, held), c.target(26, legacy, 0))
+  assert.equal(c.goal(6, legacy, 0, held), c.target(6, legacy, 0))
+  assert.equal(c.holding(held, 20), true)
+  assert.equal(c.holding(held, 30), false)
+  assert.equal(c.holding(null, 16), false)
+  // In the dark the band is around 1 lux, as hysteresis is.
+  assert.equal(c.holding({ lux: 0, pct: 30 }, 1.5), true)
+  assert.equal(c.holding({ lux: 0, pct: 30 }, 2), false)
 })
 
 test("an old additive offset converts to the preference that keeps brightness still", () => {
