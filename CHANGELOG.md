@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.1.5](https://github.com/joaodrp/omarchy-auto-brightness/compare/v0.1.4...v0.1.5) (2026-11-04)
+
+
+### Features
+
+* **control:** add the control pipeline as pure JS, with a curve in nits ([627e11d](https://github.com/joaodrp/omarchy-auto-brightness/commit/627e11d2c3b248c5b2b389a3fb461759a08f9305))
+* **control:** bend the curve for a preference, as Android does ([491dc5a](https://github.com/joaodrp/omarchy-auto-brightness/commit/491dc5a170ff46a3e61f68eb29620b320126d0a5))
+* drive every connected display independently ([9c36cf9](https://github.com/joaodrp/omarchy-auto-brightness/commit/9c36cf9681c231282ad8d0b3a32e1d5fa662c99b))
+* **endpoint:** schedule each display's writes and read-backs ([d9b0277](https://github.com/joaodrp/omarchy-auto-brightness/commit/d9b02777c9409e1b30a0c74584a6b93699f0440d))
+* **inventory:** describe displays, sensors and their pairing ([acbadca](https://github.com/joaodrp/omarchy-auto-brightness/commit/acbadca7f98e3de8a1264e9ea00621fb8bfe4592))
+* **panel:** show and control the display each bar is on ([e504046](https://github.com/joaodrp/omarchy-auto-brightness/commit/e504046b8558f76a1732e2824089d371db2b616b))
+
+
+### Bug Fixes
+
+* **control:** hold a choice while the light stays near, as Android does ([59e5fbf](https://github.com/joaodrp/omarchy-auto-brightness/commit/59e5fbfbae5cc24f3fcef3c70d9992624ea44b06))
+* **service:** do not report a sensor as failed after a suspend ([c06f409](https://github.com/joaodrp/omarchy-auto-brightness/commit/c06f4097decd711d31de39d5931c2e8b5e271341))
+* **settings:** keep a learned offset across an unrelated Setup edit ([#12](https://github.com/joaodrp/omarchy-auto-brightness/issues/12)) ([1185179](https://github.com/joaodrp/omarchy-auto-brightness/commit/11851797695a0c8a86bd8faf47ea2c5e696087a0))
+
 ## [0.1.4](https://github.com/joaodrp/omarchy-auto-brightness/compare/v0.1.3...v0.1.4) (2026-11-02)
 
 
