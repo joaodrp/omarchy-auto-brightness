@@ -151,13 +151,47 @@ function displays(monitors, sensors, lid, edid, previous) {
   })
 }
 
-// The sensors some active display reads, to sample and nothing else.
-function sensorsInUse(list) {
+// The sensors some active display reads, and the keyboard's while it is
+// active, to sample and nothing else.
+function sensorsInUse(list, keyboard) {
   var paths = []
   list.forEach(function (d) {
     if (d.active && d.kind && d.sensor && paths.indexOf(d.sensor) === -1) paths.push(d.sensor)
   })
+  if (keyboard && keyboard.active && paths.indexOf(keyboard.sensor) === -1) paths.push(keyboard.sensor)
   return paths
+}
+
+// The keyboard backlight, from its LED { name, max } or null, the sensors,
+// the lid, whether the session is locked (null when not known) and the
+// monitors. Only the chassis sensor serves it, with the lid known open; the
+// internal panel need not be on, as the keys are typed on either way.
+//   { present, sensor, active, blank, paused }
+//     active: driven; paused while locked, every screen blanked, or unknown
+//     blank: the lid is closed, so the keys are turned off
+//     paused: why it is not active, the first of "lid closed",
+//       "lid unknown", "no sensor", "lock unknown", "locked", "screens off";
+//       null when active or absent
+function keyboardState(facts) {
+  var present = !!facts.led
+  var chassis = facts.sensors.filter(function (s) { return sensorOrigin(s) === "chassis" })
+  var sensor = present && facts.lid === "open" && chassis.length ? chassis[0].path : null
+  var screenOn = (facts.monitors || []).some(function (m) { return m && m.disabled !== true && m.dpmsStatus !== false })
+  var paused = !present ? null
+    : facts.lid === "closed" ? "lid closed"
+    : facts.lid !== "open" ? "lid unknown"
+    : !chassis.length ? "no sensor"
+    : facts.locked === null || facts.locked === undefined ? "lock unknown"
+    : facts.locked ? "locked"
+    : !screenOn ? "screens off"
+    : null
+  return {
+    present: present,
+    sensor: sensor,
+    active: paused === null && present,
+    blank: present && facts.lid === "closed",
+    paused: paused
+  }
 }
 
 // The lid, from /proc/acpi/button/lid/*/state contents: open, closed, or

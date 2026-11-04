@@ -5,12 +5,15 @@ import "Control.js" as Control
 import "Inventory.js" as Inventory
 import "Settings.js" as Settings
 
-// Auto brightness for every display that can be driven. The probe reports
-// outputs, sensors, the lid and EDIDs; Inventory.js turns that into displays,
-// each a DisplayChannel. Sensors some active display reads are sampled every
-// half second, smoothed once each, and their lux fed to the displays they
-// serve. Settings live inline on this plugin's shell.json entry, per display
-// (Settings.js); a change made in Setup arrives through the config.
+// Auto brightness for every display that can be driven, and optionally the
+// keyboard backlight. The probe reports outputs, sensors, the lid, EDIDs and
+// the keyboard's LED; Inventory.js turns that into displays, each a
+// DisplayChannel, and the keyboard's state, for a KeyboardChannel. Sensors
+// some active channel reads are sampled every half second, smoothed once
+// each, and their lux fed to the channels they serve. Settings live inline
+// on this plugin's shell.json entry, per display (Settings.js); a change
+// made in Setup arrives through the config. No channel exists before the
+// settings are read, so one switched off never touches its hardware.
 Item {
   id: root
 
@@ -22,7 +25,12 @@ Item {
   property var channels: ({})          // display id -> DisplayChannel
   property var channelList: []         // the same, in inventory order, for bindings
   property var sensors: ({})           // sensor path -> { sensor, view, filtered, at }
+  property var keyboard: null          // KeyboardChannel, while the setting is on and an LED found
+  // The session is locked: true, false, or null when not known.
+  property var locked: null
   property var lastProbe: null
+  // The switches the channels were last built for.
+  property var built: null
   property bool tearingDown: false
 
   // The display IPC commands without a monitor act on: the Studio Display
@@ -34,6 +42,21 @@ Item {
       for (var i = 0; i < list.length; i++)
         if (list[i].active && list[i].kind === order[k]) return list[i]
     return null
+  }
+
+  // The output whose bar shows the keyboard: the laptop's own, unless its
+  // lid is closed, else the primary display's, else the first. Blanked
+  // outputs count, so the row stays through a lock.
+  readonly property string keyboardScreen: {
+    if (!keyboard || !lastProbe) return ""
+    var closed = Inventory.lidState(lastProbe.lid) === "closed"
+    var shown = (lastProbe.monitors || []).filter(function(m) {
+      return m && m.name && m.disabled !== true && !(closed && Inventory.isInternal(m.name))
+    })
+    var internal = shown.filter(function(m) { return Inventory.isInternal(m.name) })
+    if (internal.length) return internal[0].name
+    if (primary) return primary.name
+    return shown.length ? shown[0].name : ""
   }
 
   // The primary display's, for status.
@@ -49,7 +72,9 @@ Item {
   readonly property real lux: primary ? primary.lux : 0
   readonly property int brightness: primary ? primary.brightness : 0
   readonly property real target: primary ? primary.target : 0
-  readonly property string error: primary ? (primary.error || primary.sensorError) : (lastProbe ? "No supported display connected" : "Starting")
+  readonly property string error: primary ? (primary.error || primary.sensorError)
+    : !lastProbe || !settings ? "Starting"
+    : settings.held.screens ? "No supported display connected" : "Screen control is off"
 
   function now() { return Date.now() / 1000 }
 
@@ -68,11 +93,14 @@ Item {
 
   function applySettings() {
     if (!settings) return
+    var held = settings.held
+    if (!built || built.screens !== held.screens || built.keyboard !== held.keyboard) { applyFacts(); return }
     for (var id in channels) {
-      var d = Settings.displaySettings(settings.held, id)
+      var d = Settings.displaySettings(held, id)
       channels[id].auto = d.auto
       channels[id].preference = d.preference
     }
+    if (keyboard) keyboard.auto = held.keyboardAuto
   }
 
   function syncSettings() {
@@ -153,23 +181,41 @@ Item {
     return true
   }
 
+  // The keyboard's: its Auto is one switch, and a choice is only held.
+  function setKeyboardAuto(value) { if (keyboard) change({ keyboardAuto: value === true }) }
+  function forgetKeyboard() { if (keyboard) keyboard.forget() }
+  function setKeyboardBrightness(percent) {
+    var p = Number(percent)
+    if (!keyboard || !keyboard.known || !isFinite(p)) return false
+    return keyboard.setBrightness(p)
+  }
+
   function setEnabled(value) { setEnabledFor(primary, value) }
   function clearOffset() { clearOffsetFor(primary) }
   function setBrightness(percent) { return setBrightnessFor(primary, percent) }
 
   // Inventory ----------------------------------------------------------------
 
-  // The probe's facts, as Inventory.displays wants them, then reconciled with
-  // the channels and sensors there are.
   function applyProbe(line) {
     var facts
     try { facts = JSON.parse(String(line)) } catch (e) { console.warn("auto-brightness probe: " + e); return }
     lastProbe = facts
+    applyFacts()
+  }
+
+  // The last probe's facts, as Inventory wants them, then reconciled with
+  // the channels and sensors there are, for the switches set.
+  function applyFacts() {
+    var facts = lastProbe
+    if (!facts || !settings) return
+    var held = settings.held
+    built = { screens: held.screens, keyboard: held.keyboard }
     var edid = {}
     for (var name in facts.edid || {}) edid[name] = Inventory.edidLuminance(facts.edid[name])
     var previous = {}
     for (var id in channels) previous[id] = channels[id].sensorPath
-    var list = Inventory.displays(facts.monitors || [], facts.sensors || [], Inventory.lidState(facts.lid), edid, previous)
+    var lid = Inventory.lidState(facts.lid)
+    var list = held.screens ? Inventory.displays(facts.monitors || [], facts.sensors || [], lid, edid, previous) : []
 
     var next = {}, order = []
     for (var i = 0; i < list.length; i++) {
@@ -208,9 +254,31 @@ Item {
     for (var old in channels) if (!next[old]) channels[old].destroy()
     channels = next
     channelList = order
+    var kbd = held.keyboard ? Inventory.keyboardState({ led: facts.keyboard, sensors: facts.sensors || [], lid: lid, locked: locked, monitors: facts.monitors || [] }) : null
+    applyKeyboard(kbd, facts.keyboard)
     keepFirstAuto()
     applySettings()
-    syncSensors(facts.sensors || [], Inventory.sensorsInUse(list))
+    syncSensors(facts.sensors || [], Inventory.sensorsInUse(list, kbd))
+  }
+
+  // The keyboard channel for `state` (Inventory.keyboardState), or none.
+  function applyKeyboard(state, led) {
+    var present = state && state.present && led.max > 0
+    if (keyboard && (!present || keyboard.device !== led.name || keyboard.levels !== led.max)) {
+      keyboard.destroy()
+      keyboard = null
+    }
+    if (!present) return
+    // Blank before active: a lid reopening must not see itself closed.
+    var props = { blank: state.blank, hasSensor: state.sensor !== null, sensorPath: state.sensor || "", active: state.active, paused: state.paused || "" }
+    if (!keyboard) {
+      props.device = led.name
+      props.levels = led.max
+      props.auto = settings.held.keyboardAuto
+      keyboard = keyboardComponent.createObject(root, props)
+      return
+    }
+    for (var k in props) if (keyboard[k] !== props[k]) keyboard[k] = props[k]
   }
 
   function learnedFor(ch) {
@@ -257,6 +325,7 @@ Item {
     for (var path in sensors) sensors[path].view.reload()
   }
 
+
   // A sensor with no good reading for 3 s, failed, invalid or hung, is
   // reported on every display it serves (Control.sensorCheck). A hung read
   // is left to finish: the view folds reloads into it, and restarting it
@@ -270,8 +339,9 @@ Item {
       sampled.checked = r.state.checked
       sampled.stale = r.stale
     }
-    for (var id in channels) {
-      var ch = channels[id], used = sensors[ch.sensorPath]
+    var list = keyboard ? channelList.concat([keyboard]) : channelList
+    for (var i = 0; i < list.length; i++) {
+      var ch = list[i], used = sensors[ch.sensorPath]
       var message = used && used.stale ? "Cannot read the light sensor" : ""
       if (ch.sensorError !== message) ch.sensorError = message
     }
@@ -290,6 +360,7 @@ Item {
       var ch = channels[id]
       if (ch.sensorPath === sensorPath) ch.sample(sampled.filtered, t)
     }
+    if (keyboard && keyboard.active && keyboard.sensorPath === sensorPath) keyboard.sample(sampled.filtered, t)
   }
 
   function probe() { if (!probeProc.running) probeProc.running = true }
@@ -311,6 +382,34 @@ Item {
     }
   }
 
+  // The lock screen is not a service plugins may bind to, nor does Hyprland
+  // announce a lock: ask it over IPC, every 2 s while the keyboard is on
+  // Auto, the only time a lock matters. Anything but a clear answer counts
+  // as not known, which pauses the keyboard; so does not asking.
+  Process {
+    id: lockProc
+    command: ["timeout", "-k", "1", "2", "omarchy-shell", "lock", "isLocked"]
+    stdout: StdioCollector { id: lockOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (root.tearingDown) return
+      var m = exitCode === 0 ? /^\s*(true|false)\s*$/i.exec(lockOut.text) : null
+      var next = m ? m[1].toLowerCase() === "true" : null
+      if (next !== root.locked) { root.locked = next; root.applyFacts() }
+    }
+  }
+  Timer {
+    interval: 2000
+    repeat: true
+    running: root.keyboard !== null && root.keyboard.auto
+    triggeredOnStart: true
+    onTriggered: if (!lockProc.running) lockProc.running = true
+    onRunningChanged: {
+      if (running || root.locked === null) return
+      root.locked = null
+      root.applyFacts()
+    }
+  }
+
   // Outputs come and go with events; DPMS and the lid have none, so the
   // probe also runs every 10 s. A wall clock far ahead of the last probe
   // means the machine slept: every display reads back afresh.
@@ -322,8 +421,10 @@ Item {
     triggeredOnStart: true
     onTriggered: {
       var t = root.now()
-      if (root.lastTick && t - root.lastTick > 30)
+      if (root.lastTick && t - root.lastTick > 30) {
         for (var id in root.channels) if (root.channels[id].active) root.channels[id].attach()
+        if (root.keyboard) root.keyboard.wake()
+      }
       root.lastTick = t
       root.probe()
     }
@@ -350,6 +451,11 @@ Item {
   }
 
   Component {
+    id: keyboardComponent
+    KeyboardChannel { property string sensorPath: ""; property string sensorError: "" }
+  }
+
+  Component {
     id: sensorComponent
     FileView {
       property string sensorPath: ""
@@ -363,6 +469,7 @@ Item {
     target: root.shell
     function onBarConfigChanged() { root.syncSettings() }
   }
+
 
   onShellChanged: syncSettings()
   onManifestChanged: syncSettings()
@@ -386,7 +493,13 @@ Item {
             sensor: ch.sensorReason, lux: ch.lux, brightness: ch.brightness, target: ch.target,
             preference: ch.preference, points: ch.points, error: ch.error, sensorError: ch.sensorError
           }
-        })
+        }),
+        keyboard: root.keyboard ? {
+          device: root.keyboard.device, active: root.keyboard.active, paused: root.keyboard.paused, blank: root.keyboard.blank,
+          auto: root.keyboard.auto, sensor: root.keyboard.hasSensor, locked: root.locked,
+          lux: root.keyboard.lux, brightness: root.keyboard.brightness, holding: root.keyboard.holding,
+          error: root.keyboard.error, sensorError: root.keyboard.sensorError
+        } : null
       })
     }
     function enable(): string { root.setEnabled(true); return "enabled" }
@@ -400,17 +513,31 @@ Item {
     function set(percent: string): string {
       return root.setBrightness(percent) ? "set " + Math.round(Number(percent)) : "not set: no active display, or not a number"
     }
-    // The same, on the display on output `monitor`, e.g. eDP-1.
+    // The same, on the display on output `monitor`, e.g. eDP-1, or on the
+    // keyboard backlight as "keyboard".
     function setFor(monitor: string, percent: string): string {
+      if (monitor === "keyboard")
+        return root.setKeyboardBrightness(percent) ? "set " + Math.round(Number(percent)) : "not set: no keyboard backlight, the lid is closed, or not a number"
       return root.setBrightnessFor(root.channelOn(monitor), percent) ? "set " + Math.round(Number(percent)) : "not set: no such active display, or not a number"
     }
     function forgetFor(monitor: string): string {
+      if (monitor === "keyboard") {
+        if (!root.keyboard) return "no keyboard backlight"
+        root.forgetKeyboard()
+        return "forgot"
+      }
       var ch = root.channelOn(monitor)
       if (!ch) return "no such display"
       root.clearOffsetFor(ch)
       return "forgot"
     }
     function toggleFor(monitor: string): string {
+      if (monitor === "keyboard") {
+        if (!root.keyboard) return "no keyboard backlight"
+        var on = !root.keyboard.auto
+        root.setKeyboardAuto(on)
+        return on ? "enabled" : "disabled"
+      }
       var ch = root.channelOn(monitor)
       if (!ch) return "no such display"
       var next = !ch.auto
@@ -422,6 +549,7 @@ Item {
   Component.onDestruction: {
     tearingDown = true
     for (var id in channels) channels[id].destroy()
+    if (keyboard) keyboard.destroy()
     for (var path in sensors) sensors[path].view.destroy()
   }
 }

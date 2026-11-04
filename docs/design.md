@@ -11,8 +11,9 @@ that macOS shows in use: filter the sensor, accept a new light level only
 past a hysteresis band and after a debounce, map lux to luminance on a
 log-shaped curve, ramp to it, and treat a manual change as a correction to
 learn rather than a reason to stop. No published system uses a fixed
-lux-to-percent table from another display, and none turns auto off when
-the user touches the keys.
+lux-to-percent table from another display. ChromeOS does stop: a manual
+change turns its sensor control off until the next boot
+([powerd docs](https://chromium.googlesource.com/chromiumos/platform2/+/HEAD/power_manager/docs/screen_brightness.md)).
 
 ## Principles
 
@@ -278,13 +279,32 @@ apart by output name while both are connected; once one is unplugged the
 other takes the plain key, whichever owned it. Keying every display by
 port instead would lose its settings to every change of port.
 
+### 8. The keyboard backlight
+
+The keyboard runs the same smoothing and hysteresis on the laptop's
+sensor, then its own rules (`Keyboard.js`):
+
+| Rule | Why |
+|------|-----|
+| A curve in percent of the LED: 50% in the dark down to 15% at 60 lux | A keyboard LED has no luminance to map to, and its levels are coarse. Set by eye on one laptop, an opt-in starting point. |
+| On below 30 lux, off above 60 | One threshold would flicker the keys at the edge, the more so as their own light reaches the sensor. |
+| A darker room accepted after 2 s, not 8 | Dim slowly is right for a screen; for keys, the dark is when they are needed. |
+| A choice is held, never learnt, until a lock, the lid or sleep | A preference bent into a curve that ends at off cannot reach on in daylight, nor off in the dark. A hold that ended with the light would relight keys turned off at night; one that ends with the session brings the curve back at a clear moment. A hotkey never switches to Manual: one press would end automatic control for good. |
+| Paused while locked, every screen blanked, or the lid not open | Omarchy turns the keys off on lock and restores them on wake; one driver at a time. |
+| 2 s to settle after a pause, ending with a read whose value is adopted, not held | The wake restore lands just after the unlock, in about 10 ms with the screens on: taken as a choice, a stale level would be held. |
+| A linear fade over a second, through the same scheduler as a display | Few levels; a read-back before each automatic write sees a hotkey mid-fade. |
+
+Measured on a Framework 13: the keyboard's own light does not move the
+chassis sensor (12-13 lux either way), but the screen's does, so the
+thresholds are kept apart by a factor of two.
+
 ## Alternatives considered
 
 | Approach | Why not |
 |----------|---------|
 | Screen-content-aware brightness (wluma) | Needs a screen capture loop; the gain over ambient-only control is unquantified for a desktop display. |
 | Reusing the XDR plugin's curve | Anchored in percent on a different panel with a two-sensor requirement; the floor was 72 nits. |
-| Turning auto off on manual change | Contradicts every reference implementation and leaves the user to re-enable it. |
+| Turning auto off on manual change | ChromeOS does, until the next boot; Android and macOS do not. It leaves the user to re-enable it, and one hotkey press would. |
 | Slower dim for comfort | On a 20-step panel slower means more visible hops, see stage 5. |
 | One curve in percent for every display | The same percent is twice the light on a panel twice as bright; nits plus each display's luminance put them on one scale. |
 | An added offset in points | Eight points more than doubles the light in the dark and is barely seen in daylight, see stage 6. |

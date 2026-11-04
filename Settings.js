@@ -9,13 +9,16 @@
 // neither a repeat nor the echo of a write of ours, and then only for the
 // fields it changed.
 //
-// Settings: { auto, displays, offset? }
+// Settings: { auto, screens, keyboard, keyboardAuto, displays, offset? }
 //   auto      Auto for a display seen for the first time
+//   screens   whether displays are driven at all
+//   keyboard  whether the keyboard backlight is driven at all
+//   keyboardAuto  the keyboard's Auto, its chip
 //   displays  per display id: { auto?, preference? }, preference the curve's
 //             bend in [-1, 1] (Control.js)
 //   offset    the additive offset from before displays were kept apart, until
 //             it is migrated onto the display it was learned on
-// Fields are compared and merged by path: `auto`, `offset`, and
+// Fields are compared and merged by path: each switch, `offset`, and
 // `displays/<id>/<field>`.
 //
 // state: { held, seen, pending, stale }
@@ -31,6 +34,9 @@
 
 function isObject(v) { return v !== null && typeof v === "object" && !Array.isArray(v) }
 
+// The top-level booleans, with their defaults.
+var switches = { auto: true, screens: true, keyboard: false, keyboardAuto: true }
+
 // The persisted settings in a shell.json bar entry, with their defaults.
 function read(config) {
   var entry = config || {}
@@ -44,7 +50,13 @@ function read(config) {
     if (typeof d.preference === "number" && d.preference >= -1 && d.preference <= 1) record.preference = d.preference
     displays[id] = record
   }
-  var settings = { auto: entry.auto !== false, displays: displays }
+  var settings = {
+    auto: typeof entry.auto === "boolean" ? entry.auto : switches.auto,
+    screens: typeof entry.screens === "boolean" ? entry.screens : switches.screens,
+    keyboard: typeof entry.keyboard === "boolean" ? entry.keyboard : switches.keyboard,
+    keyboardAuto: typeof entry.keyboardAuto === "boolean" ? entry.keyboardAuto : switches.keyboardAuto,
+    displays: displays
+  }
   if (Number.isInteger(entry.offset) && entry.offset !== 0) settings.offset = entry.offset
   return settings
 }
@@ -53,7 +65,8 @@ var sep = "/"
 
 // Settings as { path: value }, every leaf by its path.
 function flatten(s) {
-  var flat = { auto: s.auto }
+  var flat = {}
+  for (var k in switches) flat[k] = s[k]
   if (s.offset !== undefined) flat.offset = s.offset
   for (var id in s.displays) {
     var d = s.displays[id]
@@ -63,7 +76,9 @@ function flatten(s) {
 }
 
 function unflatten(flat) {
-  var s = { auto: flat.auto !== false, displays: {} }
+  var s = {}
+  for (var k in switches) s[k] = typeof flat[k] === "boolean" ? flat[k] : switches[k]
+  s.displays = {}
   for (var path in flat) {
     if (path === "offset") s.offset = flat.offset
     if (path.indexOf("displays" + sep) !== 0) continue
@@ -147,12 +162,12 @@ function configEvent(state, next) {
 }
 
 // A change of ours: a toggle, a reset, a learned preference, a migration.
-// `patch` is { auto?, offset?, displays?: { id: { auto?, preference? } } },
+// `patch` is { <switch>?, offset?, displays?: { id: { auto?, preference? } } },
 // a null removing the field. Returns { state, changed, persist }.
 function own(state, patch) {
   var flat = flatten(state.held)
   function set(path, v) { if (v === null) delete flat[path]; else if (v !== undefined) flat[path] = v }
-  set("auto", patch.auto)
+  for (var k in switches) set(k, patch[k])
   set("offset", patch.offset)
   for (var id in patch.displays || {}) {
     var d = patch.displays[id]
@@ -173,8 +188,8 @@ function own(state, patch) {
 // The shell.json entry to write: `entry` with the settings' keys replaced.
 function entryWith(entry, settings) {
   var out = {}
-  for (var k in entry) if (k !== "auto" && k !== "offset" && k !== "displays") out[k] = entry[k]
-  out.auto = settings.auto
+  for (var k in entry) if (!(k in switches) && k !== "offset" && k !== "displays") out[k] = entry[k]
+  for (var w in switches) out[w] = settings[w]
   if (settings.offset !== undefined) out.offset = settings.offset
   out.displays = JSON.parse(JSON.stringify(settings.displays))
   return out

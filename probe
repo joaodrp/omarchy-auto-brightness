@@ -7,6 +7,8 @@
 #   lid        the first ACPI lid's state line, or ""
 #   edid       per output name, its EDID as `od -An -v -tx1` prints it
 #   backlight  the internal panel's backlight: name and max_brightness
+#   keyboard   the keyboard backlight Omarchy's hotkeys drive, the first
+#              *kbd_backlight* LED: name and max_brightness, or null
 # Service.qml runs it on monitor events and every 10 s, never per sample.
 
 set -u
@@ -52,18 +54,29 @@ backlight=$(omarchy-hw-display 2>/dev/null) || backlight=""
 max=""
 [[ -n $backlight && -r /sys/class/backlight/$backlight/max_brightness ]] && max=$(<"/sys/class/backlight/$backlight/max_brightness")
 
+keyboard="" kmax=""
+for led in /sys/class/leds/*kbd_backlight*; do
+  [[ -r $led/max_brightness ]] || continue
+  keyboard=${led##*/}
+  kmax=$(<"$led/max_brightness")
+  break
+done
+
 jq -cn \
   --argjson monitors "$monitors" \
   --arg sensors "$sensors" \
   --arg lid "$lid" \
   --arg edid "$edid" \
   --arg backlight "$backlight" \
-  --arg max "$max" '
+  --arg max "$max" \
+  --arg keyboard "$keyboard" \
+  --arg kmax "$kmax" '
   def rows: split("\n") | map(select(length > 0) | split("\t"));
   {
     monitors: $monitors,
     sensors: ($sensors | rows | map({ path: .[0], name: .[1], file: .[2], scale: (.[3] | tonumber? // 1), offset: (.[4] | tonumber? // 0) })),
     lid: $lid,
     edid: ($edid | rows | map({ key: .[0], value: .[1] }) | from_entries),
-    backlight: (if $backlight == "" then null else { name: $backlight, max: ($max | tonumber? // null) } end)
+    backlight: (if $backlight == "" then null else { name: $backlight, max: ($max | tonumber? // null) } end),
+    keyboard: (if $keyboard == "" then null else { name: $keyboard, max: ($kmax | tonumber? // null) } end)
   }'

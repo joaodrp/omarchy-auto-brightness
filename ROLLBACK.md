@@ -5,8 +5,9 @@ Everything this plugin touches on the machine, and how to undo it.
 | Change | Where | Undo |
 |--------|-------|------|
 | Plugin symlink | `~/.config/omarchy/plugins/io.github.joaodrp.auto-brightness` -> this repo | `rm ~/.config/omarchy/plugins/io.github.joaodrp.auto-brightness` |
-| Bar entry with `auto` and per-display `displays` keys | `~/.config/omarchy/shell.json` | `omarchy plugin disable io.github.joaodrp.auto-brightness` removes it |
+| Bar entry with the `auto`, `screens`, `keyboard` and `keyboardAuto` switches and per-display `displays` keys | `~/.config/omarchy/shell.json` | `omarchy plugin disable io.github.joaodrp.auto-brightness` removes it |
 | Display brightness values | Each driven display: Studio Display, laptop backlight, DDC/CI monitors | Set them with the slider or the hotkeys; the plugin keeps nothing else |
+| Keyboard backlight level, with `keyboard` on | The first `*kbd_backlight*` LED | Set it with the hotkeys |
 
 Full reset, in order:
 
