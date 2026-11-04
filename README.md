@@ -17,7 +17,7 @@ once; see [Displays](#displays).
   a slow dim.
 - Auto learns, per display. Any manual change, slider, wheel or hotkey,
   becomes that display's preference: how much brighter or dimmer than the
-  curve, shown on the chip as `Auto +20%` and kept until you press the
+  curve, shown on the chip as `Auto +24` and kept until you press the
   restore button beside it.
 
 ## Requirements
@@ -51,8 +51,8 @@ Setup > Plugins:
 | --- | --- | --- |
 | `auto` | `true` | Follow the room, on a display seen for the first time. Each display then keeps its own. |
 
-Each display's own Auto and preference (your correction to the curve, as a
-percentage of the curve's luminance: `+20` is a fifth more light) are kept
+Each display's own Auto and preference (your correction to the curve, a
+bend in [-1, 1]; see [docs/design.md](docs/design.md), stage 6) are kept
 under `displays`, keyed by the display's make, model and serial. The chip and the slider set them; restore
 clears the preference.
 
@@ -78,7 +78,7 @@ uses, smooths it once, and for each display it serves:
 | --- | --- |
 | Smooth | Exponential average, settles in about 2 s. Per sensor. |
 | Accept | Only a change of +10% or -20%, held for 4 s or 8 s. |
-| Map | Lux to luminance, log-shaped: 30 nits in the dark, 144 at 100 lux, 600 at 5000. Scaled by the display's preference, so `+20%` is 1.2x, then to percent between the display's floor and peak. |
+| Map | Lux to luminance, log-shaped: 30 nits in the dark, 144 at 100 lux, 600 at 5000. Bent by the display's preference, then to percent between the display's floor and peak. A manual choice is held until the light level changes. |
 | Ramp | 20 points per second up, 13 down, capped at 2 s and 3 s. Written as evenly paced steps, up to 60 a second, in the display's own units and, where those are fine, in log luminance, so the fade is as smooth as the display allows. |
 
 The evidence for each stage is in [docs/design.md](docs/design.md). The

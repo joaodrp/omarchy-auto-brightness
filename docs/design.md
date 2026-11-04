@@ -176,18 +176,47 @@ one hop every 2 s.
 
 ### 6. Learning from manual changes
 
-A manual change while auto is on becomes that display's preference: the
-ratio of the chosen luminance to the curve's at that moment, kept as a
-percentage, so `+20%` is a fifth more light than the curve gives. It
-multiplies the curve at every light level from then on, is persisted with
-the plugin's settings under that display, and is cleared only by the user,
-through the restore button or IPC.
+A manual change while auto is on does two things, as on Android:
 
-A ratio rather than an added number of points, because perceived
-brightness follows relative change in luminance (stage 4): "a bit
-brighter than it picks" means the same thing at 5 lux and at 1500, while
-eight points more than doubles the light in the dark and is barely seen
-in daylight.
+- **It is held.** The chosen brightness stays exactly as set until the
+  accepted light level changes; Android inserts the user's point into its
+  curve for the same reason.
+- **It bends the curve.** It becomes that display's preference `p`, in
+  [-1, 1]: the curve's luminance, as a fraction of its 600-nit top, is
+  raised to the power `3^-p`, and `p` is solved so the bent curve passes
+  through the choice where the bound allows. This is the gamma inverse of
+  Android's auto-brightness adjustment, with its default maximum gamma of
+  3 (`config_autoBrightnessAdjustmentMaxGamma`), adapted: the gamma
+  applies to the curve's normalised nits rather than to backlight,
+  Android's linear heuristic near the ends is left out, and the hold
+  stands in for the control point Android inserts and smooths.
+
+The preference is persisted with the plugin's settings under that display
+and cleared only by the user, through the restore button or IPC. The chip
+shows it as points over the plain curve at the room's light, as the slider
+counts them: `Auto +24`.
+
+Why a bend rather than the alternatives:
+
+| Model | Chosen 35% at 16 lux, where the curve gives 13% | At 200 lux (curve 30%) | At 1500 lux (curve 60%) |
+|-------|------|------|------|
+| Added points, `+22` | 35% | 52% | 82% |
+| Ratio of luminance, `2.7x` | 35% | 80% | 100% |
+| Bend, `p = 0.6` | 35% | 54% | 77% |
+
+An added offset in points is a large relative change in the dark and a
+small one in daylight; a ratio keeps the relative change, so an evening
+nudge saturates the display by day. A bend keeps the top of the curve
+where it is and moves the rest by roughly the same points, tapering at
+both ends, so it neither saturates early nor reaches zero.
+
+The costs are at the edges. At 5000 lux and over the curve is at its top,
+which no bend moves, so a dimmer choice there is held but not learned. The
+bound keeps an extreme choice from wrecking the rest of the curve, so it
+is learned only partly: 100% chosen in the dark learns `p = 1`, which
+gives 37% there once the hold lapses. A display whose peak is below 600
+nits reaches 100% before the curve's top, and a brighter choice there is
+lost to the clamp.
 
 A change made before any light level is accepted is learned on the first
 one. A change found by a read-back, a hotkey most likely, is learned the
@@ -206,16 +235,16 @@ This plugin keeps the correction indefinitely, and at every light level
 rather than near the one it was learned at. Both are deliberate. A desk
 display does not move between rooms the way a phone does, so the
 timeout Android needs would only surprise: the same room at one in the
-morning should not snap back from a level chosen at nine. A single
-ratio rather than a per-lux one is the simplest model that matches how
-people describe the preference, and it is visible and reversible in one
-place. An earlier version expired the correction after four hours or a
+morning should not snap back from a level chosen at nine. A single bend
+rather than a per-lux correction is the simplest model that matches how
+people describe the preference, "a bit brighter than it picks", and it is
+visible and reversible in one place. An earlier version expired the correction after four hours or a
 fourfold change in light; the timer had no justification and was removed.
 
 The single additive offset from before displays were kept apart migrates
 to the display the old controller would drive now, the Studio Display
-else the laptop panel and never a DDC monitor, as the ratio that gives
-the same brightness at the first light level accepted. Which display it
+else the laptop panel and never a DDC monitor, as the bend that gives the
+same brightness at the first light level accepted. Which display it
 was learned on was never recorded.
 
 ### 7. Driving several displays
@@ -253,7 +282,8 @@ port instead would lose its settings to every change of port.
 | Turning auto off on manual change | Contradicts every reference implementation and leaves the user to re-enable it. |
 | Slower dim for comfort | On a 20-step panel slower means more visible hops, see stage 5. |
 | One curve in percent for every display | The same percent is twice the light on a panel twice as bright; nits plus each display's luminance put them on one scale. |
-| An added offset in points | Eight points more than doubles the light in the dark and is barely seen in daylight; a ratio means the same at every level, see stage 6. |
+| An added offset in points | Eight points more than doubles the light in the dark and is barely seen in daylight, see stage 6. |
+| A ratio of luminance | A choice made in the dark saturates the display in daylight, see stage 6. |
 | Driving one display at a time | A laptop open beside a monitor leaves one of them stale, and its learned offset applied to the wrong screen. |
 
 ## Open questions
@@ -261,8 +291,9 @@ port instead would lose its settings to every change of port.
 - Panel sensors are trusted to report lux at the kernel's scale; a cover
   test would confirm it.
 - Displays without HDR metadata in their EDID are assumed to peak at
-  600 nits. A brighter or dimmer one is off by a roughly constant ratio, which
-  its preference absorbs; a measured peak would remove the need.
+  600 nits. A brighter or dimmer one is off by a roughly constant ratio,
+  which its preference mostly absorbs; a measured peak would remove the
+  need.
 
 - The nits mapping assumes Apple's 600 nit rating is the raw maximum. A
   light meter reading at two percentages would settle it.
@@ -272,7 +303,7 @@ port instead would lose its settings to every change of port.
 - Whether one-point backlight steps are visible on this panel. If not,
   the dim step could be two points at no cost.
 - Whether a per-lux correction, as Android and Plasma keep, would beat a
-  single ratio once someone lives with it across a full day of light.
+  single bend once someone lives with it across a full day of light.
 
 ## Sources
 

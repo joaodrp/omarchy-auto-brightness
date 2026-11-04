@@ -11,8 +11,9 @@
 // The curve is in nits, so displays with different peaks land on the same
 // luminance. A display's percent is linear in nits between its floor (at 0%)
 // and its peak (at 100%), from its EDID where it says. A manual change while
-// auto is on becomes the display's preference: a ratio to the curve, in
-// percent, kept at every light level until the user clears it.
+// auto is on is held while the light stands, and becomes the display's
+// preference: a bend of the curve, as Android adjusts its own, kept at every
+// light level until the user clears it.
 
 var config = {
   luxTau: -0.5 / Math.log(0.75), // EMA weight 0.25 per 0.5 s sample: settles in about 2 s
@@ -28,7 +29,10 @@ var config = {
   dimCap: 3,
   samplePeriod: 0.5,       // seconds between sensor samples
   maxFrameRate: 60,        // past what the eye resolves as steps
-  minPreference: -99.99    // a ratio of 0.0001, so 1% stays reachable on a dim display; at -100 the curve would be lost
+  // A preference p in [-1, 1] raises the curve's luminance, as a fraction of
+  // its top, to the power maxGamma^-p: Android's
+  // config_autoBrightnessAdjustmentMaxGamma default.
+  maxGamma: 3
 }
 
 // Lux anchors -> nits, interpolated in log2(lux + 1). Tuned on a 600-nit
@@ -71,23 +75,54 @@ function pctAt(nits, lum) { return (nits - lum.floor) / (lum.peak - lum.floor) *
 // Brightness percent for the accepted lux, before clamping to the display.
 function curvePct(lux, lum) { return pctAt(curve(lux), lum) }
 
+// The curve's luminance bent by `preference`. The top stays put and the
+// dark end moves most in luminance, about evenly in percent.
+function bent(nits, preference) {
+  var top = nitsPoints[nitsPoints.length - 1]
+  return top * Math.pow(nits / top, Math.pow(config.maxGamma, -preference))
+}
+
 function target(lux, lum, preference) {
-  return clampPct(pctAt(curve(lux) * (1 + preference / 100), lum))
+  return clampPct(pctAt(bent(curve(lux), preference), lum))
 }
 
-// The preference a manual choice of `pct` at `lux` teaches, to 0.01%.
+// What to drive to: a choice `held` ({ lux, pct }) exactly while the light
+// level it was made at stands, else the bent curve. Android likewise inserts
+// the user's point into its curve.
+function goal(lux, lum, preference, held) {
+  return held && held.lux === lux ? held.pct : target(lux, lum, preference)
+}
+
+// Points over the plain curve, as the chip shows them: each side as the
+// slider would.
+function points(lux, lum, preference, held) {
+  return Math.round(goal(lux, lum, preference, held)) - Math.round(target(lux, lum, 0))
+}
+
+// The preference a manual choice of `pct` at `lux` teaches, to 0.001, or
+// null when none can express it: at the curve's top every bend gives the top.
 function learn(pct, lux, lum) {
-  var ratio = nitsAt(clampPct(pct), lum) / curve(lux)
-  return Math.max(config.minPreference, Math.round((ratio - 1) * 10000) / 100)
+  var top = nitsPoints[nitsPoints.length - 1]
+  var x = curve(lux) / top, y = nitsAt(clampPct(pct), lum) / top
+  if (x >= 1) return null
+  if (y >= 1) return 1
+  // x^gamma = y, gamma = maxGamma^-p
+  var p = -Math.log(Math.log(y) / Math.log(x)) / Math.log(config.maxGamma)
+  return Math.round(clamp(p, -1, 1) * 1000) / 1000
 }
 
-// An additive offset in points, from before preferences were ratios, as the
-// ratio that gives the same brightness at `lux`. The offset was added to the
-// old percent table, which is this curve on a display of the default
-// luminance.
+// An additive offset in points, from before preferences bent the curve, as
+// the preference that gives the same brightness at `lux`, or none. The
+// offset was added to the old percent table, which is this curve on a
+// display of the default luminance.
 function preferenceFromOffset(offset, lux, lum) {
-  return offset ? learn(curvePct(lux, defaultLuminance) + offset, lux, lum) : 0
+  var p = offset ? learn(legacyPct(offset, lux), lux, lum) : 0
+  return p === null ? 0 : p
 }
+
+// The brightness an old offset gave at `lux`, to hold while migrating: a
+// bend may not reach it.
+function legacyPct(offset, lux) { return clampPct(curvePct(lux, defaultLuminance) + offset) }
 
 // Sensor smoothing: an EMA over elapsed time, so a late sample weighs more
 // rather than the filter slowing down. `prev` is null for the first sample.

@@ -39,12 +39,12 @@ Item {
   // The primary display's, for status.
   readonly property bool hardwareAvailable: primary !== null && primary.hasSensor
   readonly property bool enabled: primary ? primary.auto : (settings ? settings.held.auto : true)
-  readonly property int offset: primary ? Math.round(primary.preference) : 0
+  readonly property int offset: primary ? primary.points : 0
   // The display a legacy offset belongs to, by id, or null.
   readonly property var legacyOwner: Settings.legacyOwner(channelList.map(function(ch) {
     return { id: ch.displayId, kind: ch.kind, active: ch.active }
   }))
-  readonly property bool hasPreference: primary !== null && primary.preference !== 0
+  readonly property bool hasPreference: primary !== null && (primary.preference !== 0 || primary.points !== 0)
   readonly property string monitor: primary ? primary.name : ""
   readonly property real lux: primary ? primary.lux : 0
   readonly property int brightness: primary ? primary.brightness : 0
@@ -118,11 +118,15 @@ Item {
 
   // The additive offset from before displays were kept apart becomes the
   // preference of the display the old controller would drive now
-  // (Settings.legacyOwner), once its light level is known, so its brightness
-  // does not jump. Which display it was learned on is not recorded.
+  // (Settings.legacyOwner), once its light level is known. What it gave there
+  // is held, so brightness does not jump even where no bend reaches it.
+  // Which display it was learned on is not recorded.
   function migrate(channel) {
     if (!settings || settings.held.offset === undefined || channel.displayId !== legacyOwner || channel.accepted.accepted === null) return
-    var patch = displayPatch(channel.displayId, { preference: Control.preferenceFromOffset(settings.held.offset, channel.accepted.accepted, channel.lum) })
+    var lux = channel.accepted.accepted, offset = settings.held.offset
+    var preference = Control.preferenceFromOffset(offset, lux, channel.lum)
+    channel.holdLegacy(Control.legacyPct(offset, lux), preference)
+    var patch = displayPatch(channel.displayId, { preference: preference })
     patch.offset = null
     change(patch)
   }
@@ -374,7 +378,7 @@ Item {
           return {
             id: ch.displayId, monitor: ch.name, kind: ch.kind, active: ch.active, auto: ch.auto,
             sensor: ch.sensorReason, lux: ch.lux, brightness: ch.brightness, target: ch.target,
-            preference: ch.preference, error: ch.error, sensorError: ch.sensorError
+            preference: ch.preference, points: ch.points, error: ch.error, sensorError: ch.sensorError
           }
         })
       })

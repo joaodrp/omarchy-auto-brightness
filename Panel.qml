@@ -20,10 +20,11 @@ Panel {
   readonly property bool available: display?.active ?? false
   readonly property bool hasSensor: display?.hasSensor ?? false
   readonly property bool autoEnabled: hasSensor && (display?.auto ?? false)
-  readonly property int offset: Math.round(display?.preference ?? 0)
+  // Points over the plain curve at the room's light, as the chip shows them.
+  readonly property int offset: display?.points ?? 0
   readonly property int lux: Math.round(display?.lux ?? 0)
   readonly property string error: display ? (display.error || display.sensorError) : ""
-  readonly property bool canRestore: autoEnabled && (display?.preference ?? 0) !== 0
+  readonly property bool canRestore: autoEnabled && ((display?.preference ?? 0) !== 0 || offset !== 0)
   readonly property string icon: autoEnabled ? "󰃟" : "󰃠"
 
   // The slider follows the display, except while the pointer drags it.
@@ -42,7 +43,7 @@ Panel {
 
   function chipText() {
     if (!autoEnabled) return "Manual"
-    return "Auto" + (offset ? (offset > 0 ? " +" : " ") + offset + "%" : "")
+    return "Auto" + (offset ? (offset > 0 ? " +" : " ") + offset : "")
   }
 
   function setBrightness(value) {
@@ -185,7 +186,7 @@ Panel {
               Button {
                 visible: root.canRestore
                 iconText: "\u{F099B}"
-                tooltipText: "Back to the curve, dropping " + (root.offset ? (root.offset > 0 ? "+" : "") + root.offset + "%" : "a slight preference")
+                tooltipText: "Back to the curve, dropping " + (root.offset ? (root.offset > 0 ? "+" : "") + root.offset : "a slight preference")
                 bordered: true
                 foreground: root.bar.foreground
                 fontFamily: root.bar.fontFamily

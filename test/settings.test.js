@@ -41,86 +41,86 @@ test("read applies the defaults and drops what it cannot use", () => {
   assert.deepEqual(plain(s.read(undefined)), { auto: true, displays: {} })
   assert.deepEqual(plain(s.read({ auto: false, offset: 7 })), { auto: false, displays: {}, offset: 7 })
   assert.deepEqual(plain(s.read({ offset: 0 })), { auto: true, displays: {} })
-  const r = s.read({ displays: { [A]: { auto: false, preference: 12.5, junk: 1 }, bad: 3, [B]: { preference: "x" } } })
-  assert.deepEqual(plain(r.displays), { [A]: { auto: false, preference: 12.5 }, [B]: {} })
+  const r = s.read({ displays: { [A]: { auto: false, preference: 0.125, junk: 1 }, bad: 3, [B]: { preference: "x" } } })
+  assert.deepEqual(plain(r.displays), { [A]: { auto: false, preference: 0.125 }, [B]: {} })
 })
 
 test("a display runs with its own record over the defaults", () => {
-  const settings = { auto: false, displays: { [A]: { auto: true, preference: 20 } } }
-  assert.deepEqual(plain(s.displaySettings(settings, A)), { auto: true, preference: 20 })
+  const settings = { auto: false, displays: { [A]: { auto: true, preference: 0.2 } } }
+  assert.deepEqual(plain(s.displaySettings(settings, A)), { auto: true, preference: 0.2 })
   assert.deepEqual(plain(s.displaySettings(settings, B)), { auto: false, preference: 0 })
 })
 
 test("display ids may hold the path separator", () => {
   const id = JSON.stringify(["Odd/Make", "M/1", ""]) + "@DP-3"
-  const r = s.own(s.start(cfg(true)), { displays: { [id]: { preference: 5 } } })
-  assert.equal(prefOf(r.state.held, id), 5)
+  const r = s.own(s.start(cfg(true)), { displays: { [id]: { preference: 0.05 } } })
+  assert.equal(prefOf(r.state.held, id), 0.05)
 })
 
 test("a restarted service keeps the held settings, not a lagging config", () => {
   let st = s.start(cfg(true))
-  st = s.own(st, { displays: { [A]: { preference: 13 } } }).state
+  st = s.own(st, { displays: { [A]: { preference: 0.13 } } }).state
   const again = s.start(cfg(true), st)
-  assert.equal(prefOf(again.held), 13)
-  assert.equal(events(again, [cfg(true), cfg(true, 13)]).changes, 0)
+  assert.equal(prefOf(again.held), 0.13)
+  assert.equal(events(again, [cfg(true), cfg(true, 0.13)]).changes, 0)
 })
 
 test("re-published config changes nothing", () => {
-  assert.equal(events(s.start(cfg(true, 3)), Array(24).fill(cfg(true, 3))).changes, 0)
+  assert.equal(events(s.start(cfg(true, 0.03)), Array(24).fill(cfg(true, 0.03))).changes, 0)
 })
 
 test("a learned preference is not undone, however late its echo", () => {
   // Learned +13, then -2, before the shell reports either: first the old
   // config, then each write in turn.
   let st = s.start(cfg(true))
-  st = s.own(st, { displays: { [A]: { preference: 13 } } }).state
-  st = s.own(st, { displays: { [A]: { preference: -2 } } }).state
-  const r = events(st, [cfg(true), cfg(true), cfg(true, 13), cfg(true, -2)])
+  st = s.own(st, { displays: { [A]: { preference: 0.13 } } }).state
+  st = s.own(st, { displays: { [A]: { preference: -0.02 } } }).state
+  const r = events(st, [cfg(true), cfg(true), cfg(true, 0.13), cfg(true, -0.02)])
   assert.equal(r.changes, 0)
-  assert.equal(prefOf(r.state.held), -2)
+  assert.equal(prefOf(r.state.held), -0.02)
 })
 
 test("an own action changes the held settings at once and its echo is ignored", () => {
-  let r = s.own(s.start(cfg(true, 20)), { displays: { [A]: { preference: null } } })
+  let r = s.own(s.start(cfg(true, 0.2)), { displays: { [A]: { preference: null } } })
   assert.equal(r.changed, true)
   assert.equal(prefOf(r.state.held), 0)
   r = s.own(r.state, { displays: { [A]: { auto: false } } })
-  assert.equal(events(r.state, [cfg(true, 20), cfg(true), { auto: true, displays: { [A]: { auto: false } } }]).changes, 0)
+  assert.equal(events(r.state, [cfg(true, 0.2), cfg(true), { auto: true, displays: { [A]: { auto: false } } }]).changes, 0)
 })
 
 test("a change made elsewhere is adopted", () => {
-  const r = events(s.start(cfg(true, 4)), [cfg(true, 4), cfg(false, 9)])
+  const r = events(s.start(cfg(true, 0.04)), [cfg(true, 0.04), cfg(false, 0.09)])
   assert.equal(r.changes, 1)
-  assert.deepEqual(plain(r.state.held), cfg(false, 9))
+  assert.deepEqual(plain(r.state.held), cfg(false, 0.09))
 })
 
 test("a change made elsewhere keeps a learned preference it did not touch", () => {
   // Learned +13; before its echo, Setup turns the default auto off from a
   // config that still lacks the preference. Only auto changed there.
   let st = s.start(cfg(true))
-  st = s.own(st, { displays: { [A]: { preference: 13 } } }).state
+  st = s.own(st, { displays: { [A]: { preference: 0.13 } } }).state
   const r = s.configEvent(st, cfg(false))
-  assert.deepEqual(plain(r.state.held), cfg(false, 13))
+  assert.deepEqual(plain(r.state.held), cfg(false, 0.13))
   // The config lost the preference, so it is written back, as held, later.
   assert.equal(r.restore, true)
   const back = s.own(r.state, {})
-  assert.deepEqual(plain(back.persist), cfg(false, 13))
+  assert.deepEqual(plain(back.persist), cfg(false, 0.13))
   assert.equal(back.changed, false)
   // The late echo of the learned write, then of the write-back, change nothing.
-  const after = events(back.state, [cfg(true, 13), cfg(false, 13)])
+  const after = events(back.state, [cfg(true, 0.13), cfg(false, 0.13)])
   assert.equal(after.changes, 0)
-  assert.deepEqual(plain(after.state.held), cfg(false, 13))
+  assert.deepEqual(plain(after.state.held), cfg(false, 0.13))
   assert.equal(after.state.pending.length, 0)
 })
 
 test("one display's change elsewhere leaves another display's alone", () => {
   // Learned +13 on A; before its echo, someone edits B's preference.
   let st = s.start(cfg(true))
-  st = s.own(st, { displays: { [A]: { preference: 13 } } }).state
-  const edited = { auto: true, displays: { [B]: { preference: 7 } } }
+  st = s.own(st, { displays: { [A]: { preference: 0.13 } } }).state
+  const edited = { auto: true, displays: { [B]: { preference: 0.07 } } }
   const r = s.configEvent(st, edited)
-  assert.equal(prefOf(r.state.held, A), 13)
-  assert.equal(prefOf(r.state.held, B), 7)
+  assert.equal(prefOf(r.state.held, A), 0.13)
+  assert.equal(prefOf(r.state.held, B), 0.07)
   assert.equal(r.restore, true)
 })
 
@@ -128,36 +128,36 @@ test("a write-back superseded before it is made leaves no false echo", () => {
   // The write-back of (off, 13) is due, but Setup sets 5 first, so the
   // write-back finds nothing to write. Later real edits must all land.
   let st = s.start(cfg(true))
-  st = s.own(st, { displays: { [A]: { preference: 13 } } }).state
+  st = s.own(st, { displays: { [A]: { preference: 0.13 } } }).state
   let r = s.configEvent(st, cfg(false))
-  r = s.configEvent(r.state, cfg(false, 5))
-  assert.equal(prefOf(r.state.held), 5)
+  r = s.configEvent(r.state, cfg(false, 0.05))
+  assert.equal(prefOf(r.state.held), 0.05)
   const back = s.own(r.state, {})
-  assert.deepEqual(plain(back.persist), cfg(false, 5))
+  assert.deepEqual(plain(back.persist), cfg(false, 0.05))
   assert.equal(back.state.pending.length, 0)
-  const after = events(back.state, [cfg(false, 5), cfg(false, 13), cfg(false, 5)])
+  const after = events(back.state, [cfg(false, 0.05), cfg(false, 0.13), cfg(false, 0.05)])
   assert.equal(after.changes, 2)
-  assert.equal(prefOf(after.state.held), 5)
+  assert.equal(prefOf(after.state.held), 0.05)
 })
 
 test("echoes match the oldest write they equal, overtaken or not", () => {
   // Learn 13, Setup turns auto off, the write-back lands, then the user turns
   // auto on: (on, 13) is both an overtaken write and the latest one.
   let st = s.start(cfg(true))
-  st = s.own(st, { displays: { [A]: { preference: 13 } } }).state
+  st = s.own(st, { displays: { [A]: { preference: 0.13 } } }).state
   st = s.configEvent(st, cfg(false)).state
   st = s.own(st, {}).state
   st = s.own(st, { auto: true }).state
-  const after = events(st, [cfg(true, 13), cfg(false, 13), cfg(true, 13)])
+  const after = events(st, [cfg(true, 0.13), cfg(false, 0.13), cfg(true, 0.13)])
   assert.equal(after.changes, 0)
-  assert.deepEqual(plain(after.state.held), cfg(true, 13))
+  assert.deepEqual(plain(after.state.held), cfg(true, 0.13))
 })
 
 test("a field changed elsewhere wins over a pending write to it", () => {
   let st = s.start(cfg(true))
-  st = s.own(st, { displays: { [A]: { preference: 13 } } }).state
-  const r = s.configEvent(st, cfg(true, 5))
-  assert.equal(prefOf(r.state.held), 5)
+  st = s.own(st, { displays: { [A]: { preference: 0.13 } } }).state
+  const r = s.configEvent(st, cfg(true, 0.05))
+  assert.equal(prefOf(r.state.held), 0.05)
   assert.equal(r.restore, undefined)
 })
 
@@ -166,36 +166,44 @@ test("an action that changes nothing leaves no pending echo", () => {
   st = s.own(st, { displays: { [A]: { preference: null } } }).state
   st = s.own(st, { auto: true }).state
   assert.equal(st.pending.length, 0)
-  assert.equal(events(st, [cfg(true, 5), cfg(true)]).changes, 2)
+  assert.equal(events(st, [cfg(true, 0.05), cfg(true)]).changes, 2)
 })
 
 test("repeating the latest pending write queues nothing", () => {
   let st = s.start(cfg(true))
-  st = s.own(st, { displays: { [A]: { preference: 13 } } }).state
-  st = s.own(st, { displays: { [A]: { preference: 13 } } }).state
+  st = s.own(st, { displays: { [A]: { preference: 0.13 } } }).state
+  st = s.own(st, { displays: { [A]: { preference: 0.13 } } }).state
   assert.equal(st.pending.length, 1)
 })
 
 test("every pending write is an echo, however many", () => {
   let st = s.start(cfg(true))
-  for (let i = 1; i <= 50; i++) st = s.own(st, { displays: { [A]: { preference: i } } }).state
-  const r = events(st, [cfg(true, 1), cfg(true, 2), cfg(true, 30), cfg(true, 50)])
+  for (let i = 1; i <= 50; i++) st = s.own(st, { displays: { [A]: { preference: i / 100 } } }).state
+  const r = events(st, [cfg(true, 0.01), cfg(true, 0.02), cfg(true, 0.3), cfg(true, 0.5)])
   assert.equal(r.changes, 0)
-  assert.equal(prefOf(r.state.held), 50)
+  assert.equal(prefOf(r.state.held), 0.5)
   assert.equal(r.state.pending.length, 0)
 })
 
 test("migrating the old offset removes it in the same write", () => {
   let st = s.start(s.read({ auto: true, offset: 6 }))
-  const r = s.own(st, { offset: null, displays: { [A]: { preference: 43 } } })
+  const r = s.own(st, { offset: null, displays: { [A]: { preference: 0.43 } } })
   assert.equal(r.persist.offset, undefined)
-  assert.equal(prefOf(r.persist), 43)
+  assert.equal(prefOf(r.persist), 0.43)
 })
 
 test("the entry written keeps unrelated keys and drops a migrated offset", () => {
   const entry = { id: "x", auto: true, offset: 6, other: 1 }
-  const out = s.entryWith(entry, cfg(false, 43))
-  assert.deepEqual(plain(out), { id: "x", other: 1, auto: false, displays: { [A]: { preference: 43 } } })
+  const out = s.entryWith(entry, cfg(false, 0.43))
+  assert.deepEqual(plain(out), { id: "x", other: 1, auto: false, displays: { [A]: { preference: 0.43 } } })
+})
+
+test("a preference outside [-1, 1] is not read: not one Control.js could have learned", () => {
+  const read = (pref) => plain(s.read({ displays: { [A]: { auto: true, preference: pref } } })).displays[A]
+  assert.deepEqual(read(0.599), { auto: true, preference: 0.599 })
+  assert.deepEqual(read(-1), { auto: true, preference: -1 })
+  assert.deepEqual(read(114.29), { auto: true })
+  assert.deepEqual(read(-1.5), { auto: true })
 })
 
 test("the legacy offset belongs to the display the old controller drove, never a DDC one", () => {
