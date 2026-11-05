@@ -26,10 +26,12 @@ model, how it is connected, what `hyprctl monitors -j` reports for `make` and
 | `Keyboard.js` | The keyboard backlight's curve, thresholds, pauses and holds. Qt-free |
 | `test/keyboard.test.js` | Unit tests for `Keyboard.js`, run under node |
 | `Panel.qml` | The bar icon and the panel |
+| `docs/how-it-works.md` | What the plugin does, step by step, and what it touches |
 | `docs/design.md` | Why each stage of the control pipeline is the way it is, with sources |
 | `preview.png` | The listing image the [plugin marketplace](https://plugins.omarchy.org/publish.html) reads from the repository root |
 | `docs/preview.html`, `docs/panel.png` | The source of `preview.png` and the demo frame it insets; see [Screenshots](#screenshots) |
 | `docs/demo.gif`, `docs/demo.mp4` | The README hero and the shareable clip; see [Screenshots](#screenshots) |
+| `docs/panel-screen.png` | The README's screen-only pop-up, from the Studio Display's bar; see [Screenshots](#screenshots) |
 | `ROLLBACK.md` | Everything the plugin touches on a machine, and how to undo it |
 | `.github/`, `release-please-config.json`, `.release-please-manifest.json` | CI with its manifest check, and the release automation; see [Releases](#releases) |
 
@@ -92,38 +94,52 @@ curve, the thresholds or the ramp should extend `test/control.test.js`.
 
 ## Screenshots
 
-The display is scale 2, so captured pixels are twice the logical size. Switch
-to an empty workspace first so the wallpaper, not a window, sits behind the
-panel. Quattro's `hyprctl dispatch` takes Lua:
+The assets show the laptop's pop-up, the one with both the screen and the
+keyboard. The laptop panel, `eDP-1`, is scale 2 and sits at logical x 2560,
+right of a 2560-wide display, so captured pixels are twice the logical size.
+Switch the laptop to an empty workspace first so the wallpaper, not a
+window, sits behind the pop-up. The IPC `open` opens the primary screen's
+pop-up, so click the laptop bar's icon instead. Quattro's `hyprctl dispatch`
+takes Lua:
 
 ```sh
-hyprctl dispatch 'hl.dsp.focus({ workspace = "2" })'
+hyprctl dispatch 'hl.dsp.focus({ workspace = "3" })'
+wlrctl pointer move -10000 -10000; wlrctl pointer move 3762 15; wlrctl pointer click
+grim -o eDP-1 shot.png
+```
+
+The screen-only pop-up in the README is the Studio Display's, `DP-1`, which
+the IPC `open` does open; crop it to the clip's margins:
+
+```sh
+hyprctl dispatch 'hl.dsp.focus({ monitor = "DP-1" })'
+hyprctl dispatch 'hl.dsp.focus({ workspace = "4" })'
 omarchy-shell io.github.joaodrp.auto-brightness open
-grim -o DP-3 shot.png
+grim -g "2113,0 420x181" docs/panel-screen.png  # logical pixels; adjust to the panel
 omarchy-shell io.github.joaodrp.auto-brightness close
 ```
 
-The demo clip is recorded the same way, with `wlrctl pointer move` and
+The demo clip is recorded with `wlrctl pointer move` and
 `click` driving the panel (positions are in logical pixels; move to a far
 negative corner first, then to the target) and `gpu-screen-recorder -w
 region` capturing a frame with equal margins around the panel:
 
 ```sh
-gpu-screen-recorder -w region -region 422x176+2086+0 -f 30 -c mp4 -cursor yes -o demo.mp4
-ffmpeg -i demo.mp4 -vf "fps=15,scale=633:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" demo.gif
+gpu-screen-recorder -w region -region 420x334+3553+0 -f 30 -c mp4 -cursor yes -o demo.mp4
+ffmpeg -i demo.mp4 -vf "fps=15,scale=630:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" demo.gif
 ```
 
 `preview.png` is `docs/preview.html` rendered at 1920x1080. The marketplace
 crops it to about 2:1 and shows it 505px wide with the plugin name printed
 underneath, so the page keeps everything that matters out of the top and
 bottom 60px and spends its headline on the pitch, not the name. It insets
-`docs/panel.png`, the frame of the demo clip where the chip reads `Auto +6`,
+`docs/panel.png`, the frame of the demo clip where the screen chip reads `Auto +28`,
 cut to the panel's border by pixel position; after a new clip, re-extract
 the frame and check the cut still holds. The page is set in Nimbus Sans,
 from `gsfonts`.
 
 ```sh
-ffmpeg -ss 8 -i docs/demo.mp4 -frames:v 1 docs/panel.png
+ffmpeg -ss 4 -i docs/demo.mp4 -frames:v 1 docs/panel.png
 chromium --headless --hide-scrollbars --window-size=1920,1080 --screenshot=preview.png docs/preview.html
 ```
 
@@ -166,7 +182,7 @@ They describe the current state, never the change; git history holds that.
   Never act on config state directly; `Settings.js` acts only on
   changes that are neither repeats nor echoes of the service's own writes.
 - **A laptop light sensor can read 0 after a resume** until its driver is
-  bound again; see the README's known limits. A flat 0 in a lit room is
+  bound again; see [docs/how-it-works.md](docs/how-it-works.md#a-sensor-that-reads-0-after-sleep). A flat 0 in a lit room is
   that, not the plugin.
 - **Icon glyphs lie.** Verify any new Nerd Font codepoint by rendering it
   before shipping; a guessed codepoint here drew a barrel.
