@@ -185,6 +185,25 @@ function own(state, patch) {
   }
 }
 
+// The bar's sections in Omarchy's own order, which decides between
+// duplicates: 4.5 adds `centerBegin`, `centerEnd` and the tray's drawer.
+var barSections = ["left", "centerBegin", "center", "centerEnd", "right", "tray"]
+
+// The plugin's own entry in the bar layout, `{}` if there is none. Every
+// section is searched, the known ones first, then any added since.
+function entry(layout, id) {
+  if (!isObject(layout)) return {}
+  var order = barSections.slice()
+  for (var extra in layout) if (order.indexOf(extra) < 0) order.push(extra)
+  for (var s = 0; s < order.length; s++) {
+    var entries = layout[order[s]]
+    if (!Array.isArray(entries)) continue
+    for (var i = 0; i < entries.length; i++)
+      if (isObject(entries[i]) && entries[i].id === id) return entries[i]
+  }
+  return {}
+}
+
 // The shell.json entry to write: `entry` with the settings' keys replaced.
 function entryWith(entry, settings) {
   var out = {}

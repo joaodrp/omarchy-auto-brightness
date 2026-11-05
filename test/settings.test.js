@@ -245,6 +245,34 @@ test("a switch flipped in Setup merges with a pending write of ours", () => {
   assert.equal(r.restore, true)
 })
 
+const ID = "io.github.joaodrp.auto-brightness"
+
+test("entry: found in any section, Omarchy 4.0's or 4.5's", () => {
+  for (const section of ["left", "center", "right", "centerBegin", "centerEnd", "tray"]) {
+    const layout = { left: [{ id: "omarchy.menu" }], [section]: [{ id: "omarchy.clock" }, { id: ID, keyboard: true }] }
+    assert.deepEqual(plain(s.entry(layout, ID)), { id: ID, keyboard: true }, section)
+  }
+})
+
+test("entry: a section added later is searched too", () => {
+  assert.deepEqual(plain(s.entry({ someday: [{ id: ID, auto: false }] }, ID)), { id: ID, auto: false })
+})
+
+test("entry: duplicates resolve in the bar's order, not the file's", () => {
+  const layout = { tray: [{ id: ID, auto: 1 }], right: [{ id: ID, auto: 2 }], center: [{ id: ID, auto: 3 }], centerBegin: [{ id: ID, auto: 4 }], left: [{ id: ID, auto: 5 }] }
+  assert.equal(s.entry(layout, ID).auto, 5)
+  delete layout.left
+  assert.equal(s.entry(layout, ID).auto, 4)
+  assert.equal(s.entry({ someday: [{ id: ID, auto: 1 }], tray: [{ id: ID, auto: 2 }] }, ID).auto, 2)
+})
+
+test("entry: none, a bare id or a malformed layout reads as no settings", () => {
+  assert.deepEqual(plain(s.entry({ right: [{ id: "omarchy.audio" }] }, ID)), {})
+  assert.deepEqual(plain(s.entry({ right: [ID] }, ID)), {})
+  assert.deepEqual(plain(s.entry({ right: null, tray: "x", left: [null, 3] }, ID)), {})
+  assert.deepEqual(plain(s.entry(undefined, ID)), {})
+})
+
 let failed = 0
 for (const [name, fn] of tests) {
   try { fn(); console.log("ok   " + name) } catch (e) { failed++; console.log("FAIL " + name + "\n     " + e.message) }

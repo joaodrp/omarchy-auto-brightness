@@ -78,16 +78,7 @@ Item {
 
   function now() { return Date.now() / 1000 }
 
-  function configEntry() {
-    var sections = ["left", "center", "right"]
-    var layout = shell?.barConfig?.layout
-    for (var s = 0; layout && s < sections.length; s++) {
-      var entries = layout[sections[s]] || []
-      for (var i = 0; i < entries.length; i++)
-        if (entries[i]?.id === manifest?.id) return entries[i]
-    }
-    return ({})
-  }
+  function configEntry() { return Settings.entry(shell?.barConfig?.layout, manifest?.id) }
 
   // Settings ---------------------------------------------------------------
 
