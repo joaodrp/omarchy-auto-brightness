@@ -119,6 +119,18 @@ test("units reach zero, so the keys can be turned off", () => {
   assert.equal(k.toPct(1, 3), 33)
 })
 
+test("any level above off lights a keyboard with few steps", () => {
+  // The curve's dimmest lit level, and a slider nudge, on 1- and 2-step LEDs.
+  for (const levels of [1, 2, 3]) {
+    assert.equal(k.toUnits(k.level(29, true).pct, levels), 1, `levels ${levels}`)
+    assert.equal(k.toUnits(1, levels), 1, `levels ${levels}`)
+    assert.equal(k.toUnits(0, levels), 0, `levels ${levels}`)
+  }
+  assert.equal(k.toUnits(40, 1), 1)
+  assert.equal(k.toUnits(20, 100), 20)
+  assert.equal(k.toUnits(50, 0), 0)
+})
+
 test("a fade is linear, reaches off, skips repeats and keeps its pace", () => {
   const units = (frames) => [...frames.map((f) => f.units)]
   assert.deepEqual(units(k.fade(30, 0)), [27, 24, 21, 18, 15, 12, 9, 6, 3, 0])
