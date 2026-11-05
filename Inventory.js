@@ -167,14 +167,16 @@ function sensorsInUse(list, keyboard) {
 }
 
 // The keyboard backlight, from its LED { name, max } or null, the sensors,
-// the lid, whether the session is locked (null when not known) and the
+// the lid, whether the session is locked (null when asked without a clear
+// answer, undefined when not asked yet) and the
 // monitors. Only the chassis sensor serves it, with the lid known open; the
 // internal panel need not be on, as the keys are typed on either way.
 //   { present, sensor, active, blank, paused }
 //     active: driven; paused while locked, every screen blanked, or unknown
 //     blank: the lid is closed, so the keys are turned off
 //     paused: why it is not active, the first of "lid closed",
-//       "lid unknown", "no sensor", "lock unknown", "locked", "screens off";
+//       "lid unknown", "no sensor", "lock pending", "lock unknown", "locked",
+//       "screens off";
 //       null when active or absent
 function keyboardState(facts) {
   var present = !!facts.led
@@ -185,7 +187,8 @@ function keyboardState(facts) {
     : facts.lid === "closed" ? "lid closed"
     : facts.lid !== "open" ? "lid unknown"
     : !chassis.length ? "no sensor"
-    : facts.locked === null || facts.locked === undefined ? "lock unknown"
+    : facts.locked === undefined ? "lock pending"
+    : facts.locked === null ? "lock unknown"
     : facts.locked ? "locked"
     : !screenOn ? "screens off"
     : null

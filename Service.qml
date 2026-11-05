@@ -26,8 +26,10 @@ Item {
   property var channelList: []         // the same, in inventory order, for bindings
   property var sensors: ({})           // sensor path -> { sensor, view, filtered, at }
   property var keyboard: null          // KeyboardChannel, while the setting is on and an LED found
-  // The session is locked: true, false, or null when not known.
-  property var locked: null
+  // The session is locked: true, false, null when asked without a clear
+  // answer, or undefined when not asked since the poll started.
+  property var locked: undefined
+  property int lockSession: 0          // bumped as the poll starts and stops
   property var lastProbe: null
   // The switches the channels were last built for.
   property var built: null
@@ -392,8 +394,11 @@ Item {
     id: lockProc
     command: ["timeout", "-k", "1", "2", "omarchy-shell", "lock", "isLocked"]
     stdout: StdioCollector { id: lockOut; waitForEnd: true }
+    property int session: 0
     onExited: function(exitCode) {
-      if (root.tearingDown) return
+      // An answer asked for before the poll last started or stopped is
+      // stale: it would overwrite the reset below.
+      if (root.tearingDown || session !== root.lockSession) return
       var m = exitCode === 0 ? /^\s*(true|false)\s*$/i.exec(lockOut.text) : null
       var next = m ? m[1].toLowerCase() === "true" : null
       if (next === root.locked) return
@@ -409,10 +414,15 @@ Item {
     repeat: true
     running: root.keyboard !== null && root.keyboard.auto
     triggeredOnStart: true
-    onTriggered: if (!lockProc.running) lockProc.running = true
+    onTriggered: {
+      if (lockProc.running) return
+      lockProc.session = root.lockSession
+      lockProc.running = true
+    }
     onRunningChanged: {
-      if (running || root.locked === null) return
-      root.locked = null
+      root.lockSession++
+      if (root.locked === undefined) return
+      root.locked = undefined
       root.applyFacts()
     }
   }
