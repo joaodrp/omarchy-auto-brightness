@@ -149,6 +149,12 @@ test("the keyboard pauses while locked, every screen blanked, or either unknown"
   assert.equal(kbd({ locked: true }).blank, false, "the lock turns it off itself")
 })
 
+test("a lock not asked about yet pauses the keyboard, apart from one asked and not answered", () => {
+  assert.equal(kbd({ locked: undefined }).active, false)
+  assert.equal(kbd({ locked: undefined }).paused, "lock pending")
+  assert.equal(kbd({ locked: null }).paused, "lock unknown")
+})
+
 test("a paused keyboard says why, the lid first", () => {
   assert.equal(kbd({ locked: true }).paused, "locked")
   assert.equal(kbd({ locked: null }).paused, "lock unknown")
