@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.joaodrp.auto-brightness",
   "name": "Brightness",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "author": "João Pereira",
   "license": "MIT",
   "description": "Ambient-light auto brightness for your screens and keyboard: the Apple Studio Display, a laptop panel or a DDC/CI monitor, and the keyboard backlight, from the Omarchy bar.",

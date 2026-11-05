@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.6](https://github.com/joaodrp/omarchy-auto-brightness/compare/v0.1.5...v0.1.6) (2026-11-05)
+
+
+### Features
+
+* control the keyboard backlight, and let screen control be switched off ([94740dd](https://github.com/joaodrp/omarchy-auto-brightness/commit/94740ddaffb6ef260d30902ac78bb1a6e04c135e))
+* **panel:** follow brightness hotkeys while the pop-up is open ([e456606](https://github.com/joaodrp/omarchy-auto-brightness/commit/e4566068e8a7b0f870c00255f422118e9d548c53))
+* **panel:** keep the widget while a display is only blanked ([265f5a9](https://github.com/joaodrp/omarchy-auto-brightness/commit/265f5a9fe2a15bd95cde177f3493e7d9e03a2391))
+
 ## [0.1.5](https://github.com/joaodrp/omarchy-auto-brightness/compare/v0.1.4...v0.1.5) (2026-11-04)
 
 
