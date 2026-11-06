@@ -96,5 +96,10 @@ function fade(from, to) {
 }
 
 // Units of an LED that has an off: 0 is a level, unlike a display's.
-function toUnits(pct, levels) { return Math.round(Control.clamp(pct, 0, 100) * levels / 100) }
+// Anything above off is at least one step, so a keyboard with few steps
+// still lights where the curve or the slider asks for a dim level.
+function toUnits(pct, levels) {
+  var p = Control.clamp(pct, 0, 100)
+  return p > 0 && levels > 0 ? Math.max(1, Math.round(p * levels / 100)) : 0
+}
 function toPct(units, levels) { return Math.round(units * 100 / levels) }
