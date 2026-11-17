@@ -222,7 +222,7 @@ Item {
       ledFile.reload()
       return
     }
-    proc.command = ["timeout", "-k", "1", "8", "brightnessctl", "-q", "-d", device, "set", String(op.units)]
+    proc.command = Endpoint.timed(["brightnessctl", "-q", "-d", device, "set", String(op.units)])
     proc.running = true
   }
 
@@ -303,14 +303,10 @@ Item {
     }
     attach()
   }
-  // Destroying a Process kills only `timeout`, whose children would outlive
-  // it; signal its process group the way `timeout` itself would.
   Component.onDestruction: {
-    var pid = proc.running ? proc.processId : null
     generation++
     pumpTimer.stop()
     frameTimer.stop()
     settleTimer.stop()
-    if (pid) Quickshell.execDetached(["sh", "-c", "kill -TERM -- -$0 2>/dev/null; sleep 1; kill -KILL -- -$0 2>/dev/null", String(pid)])
   }
 }

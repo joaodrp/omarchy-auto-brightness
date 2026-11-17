@@ -282,8 +282,70 @@ test("cancelAuto drops the automatic target, and requestRead makes a read-back d
   assert.equal(e.next(e.requestRead(idle("ddc")), 1).op.op, "read")
 })
 
-let failed = 0
-for (const [name, fn] of tests) {
-  try { fn(); console.log("ok   " + name) } catch (err) { failed++; console.log("FAIL " + name + "\n     " + err.message) }
+// The helper commands, run for real.
+const { spawn, spawnSync } = require("node:child_process")
+
+function spawnHelper(argv) {
+  return spawnSync(argv[0], argv.slice(1), { encoding: "utf8", timeout: 15000 })
 }
-if (failed) process.exit(1)
+
+// Starts a guarded bash `script` that prints "ready" once its processes are
+// up, sends `signal` to the process Quickshell holds, and resolves whether
+// anything it started is left 2.5 s later: everything holds its stdout, so
+// the pipe closes only once all of it is gone. Its sleeps end by themselves.
+function survivors(script, signal) {
+  return new Promise((resolve, reject) => {
+    const argv = e.guarded(["bash", "-c", script])
+    const child = spawn(argv[0], argv.slice(1), { stdio: ["ignore", "pipe", "ignore"] })
+    let signalled = false, timer
+    child.stdout.on("data", (d) => {
+      if (signalled || !String(d).includes("ready")) return
+      signalled = true
+      child.kill(signal)
+      timer = setTimeout(() => { child.stdout.destroy(); resolve(true) }, 2500)
+    })
+    child.stdout.on("close", () => {
+      clearTimeout(timer)
+      if (!signalled) reject(new Error("the helper never started"))
+      else resolve(false)
+    })
+  })
+}
+
+test("a helper's exit status and output come back", () => {
+  for (const wrap of [e.timed, e.guarded]) {
+    const ok = spawnHelper(wrap(["sh", "-c", "echo 42"], 2))
+    assert.equal(ok.status, 0)
+    assert.equal(ok.stdout.trim(), "42")
+    assert.equal(spawnHelper(wrap(["sh", "-c", "exit 3"], 2)).status, 3)
+    // A hung one fails, a second or so after its deadline.
+    const t0 = Date.now()
+    assert.notEqual(spawnHelper(wrap(["sleep", "30"], 1)).status, 0)
+    assert.ok(Date.now() - t0 < 3000, "it outlived its deadline")
+  }
+})
+
+test("a destroyed Process takes everything its script started with it", async () => {
+  // Quickshell kills a destroyed Process outright.
+  assert.equal(await survivors("sleep 5 & echo ready; wait", "SIGKILL"), false)
+})
+
+test("a stopped script's processes go, even one that ignores TERM", async () => {
+  // The script exits on TERM, its child does not.
+  assert.equal(await survivors('(trap "" TERM; exec sleep 5) & echo ready; wait', "SIGTERM"), false)
+})
+
+test("a stopped script has a second to pass TERM on, as sudo does", async () => {
+  // A child in a session of its own is out of the group's reach: only the
+  // script's own forwarding, 50 ms late, ends it.
+  const script = 'trap "sleep 0.05; kill -TERM \\$s; exit" TERM; setsid sh -c "echo ready; exec sleep 5" & s=$!; wait'
+  assert.equal(await survivors(script, "SIGTERM"), false)
+})
+
+;(async () => {
+  let failed = 0
+  for (const [name, fn] of tests) {
+    try { await fn(); console.log("ok   " + name) } catch (err) { failed++; console.log("FAIL " + name + "\n     " + err.message) }
+  }
+  if (failed) process.exit(1)
+})()
