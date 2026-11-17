@@ -263,7 +263,7 @@ of its own (`Endpoint.js`):
 | A user write goes before any automatic one, and replaces an older one | The hand lands at once; a queued fade step must not undo it. |
 | An automatic write needs a read-back after the last write, under 0.5 s old | A hotkey pressed mid-fade is seen and adopted, not overwritten by the next step. |
 | Idle read-backs every 10 s, 30 s over DDC/CI | Hotkeys and other tools are noticed without a busy loop. |
-| Every helper runs under `timeout`, its process group killed on expiry | A hung `ddcutil` or `sudo` cannot hold a display, nor write late. |
+| Every helper runs under `timeout`; a script's process group is ended from inside, on expiry, stop or teardown | A hung `ddcutil` or `sudo` cannot hold a display, nor write late, and no signal can reach a reused group ID. |
 | Reads and writes back off separately after failures | A display that cannot be read can still be set by hand. |
 
 Which sensor serves which display, and whether a display is active, comes

@@ -154,3 +154,25 @@ function complete(state, id, ok, now, value) {
   if (moved !== null) read.auto = null
   return { state: copy(state, read), moved: moved }
 }
+
+// Helper processes run under `timeout`, which ends their process group
+// after `seconds`, 8 by default, within any policy's timeout, and kills it
+// a second later.
+
+// A program that starts nothing: if `timeout` is killed outright, as
+// Quickshell kills a destroyed Process, the program goes with it.
+function timed(cmd, seconds) {
+  return ["timeout", "-k", "1", String(seconds === undefined ? 8 : seconds)].concat(cmd)
+}
+
+// A script, whose children would outlive a killed `timeout`: a guard runs
+// it, and on TERM signals the group, then a second later kills what is
+// left, which ignored TERM included. The guard gets TERM from `timeout`,
+// when its Process is stopped or past the deadline, or as `timeout` dies.
+// It only ever signals its own group, from inside, so the group's ID is
+// never one that could have been reused.
+var guard = 'trap \'trap "" TERM; kill -TERM 0; sleep 1; kill -KILL 0\' TERM; "$@" & wait $!'
+
+function guarded(cmd, seconds) {
+  return timed(["setpriv", "--pdeathsig", "TERM", "bash", "-c", guard, "guard"].concat(cmd), seconds)
+}

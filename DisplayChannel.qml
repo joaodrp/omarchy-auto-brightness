@@ -288,9 +288,6 @@ Item {
     proc.running = true
   }
 
-  // Each helper runs under `timeout`, which signals its whole process group,
-  // so a hung `ddcutil` or `sudo` beneath it goes too, and is killed outright
-  // a second later; all within Endpoint's own timeout.
   function command(op) {
     var pct = Math.round(op.units * 100 / levels) + "%"
     var cmd
@@ -300,7 +297,7 @@ Item {
       cmd = ["brightnessctl", "-q", "-d", backlight, "set", String(op.units)]
     else
       cmd = op.op === "write" ? ["omarchy-brightness-display-ddc", name, pct] : ["omarchy-brightness-display-ddc", name]
-    return ["timeout", "-k", "1", "8"].concat(cmd)
+    return kind === "panel" ? Endpoint.timed(cmd) : Endpoint.guarded(cmd)
   }
 
   // A panel read is a FileView load, which a change of path cancels.
@@ -381,11 +378,5 @@ Item {
   Timer { id: frameTimer; repeat: false; onTriggered: channel.playFrames() }
 
   Component.onCompleted: if (active) attach()
-  // Destroying a Process kills only `timeout`, whose children would outlive
-  // it; signal its process group the way `timeout` itself would.
-  Component.onDestruction: {
-    var pid = proc.running ? proc.processId : null
-    detach()
-    if (pid) Quickshell.execDetached(["sh", "-c", "kill -TERM -- -$0 2>/dev/null; sleep 1; kill -KILL -- -$0 2>/dev/null", String(pid)])
-  }
+  Component.onDestruction: detach()
 }
