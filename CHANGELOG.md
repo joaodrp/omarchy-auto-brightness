@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.7](https://github.com/joaodrp/omarchy-auto-brightness/compare/v0.1.6...v0.1.7) (2026-11-17)
+
+
+### Bug Fixes
+
+* end a helper's processes from inside its group, never by a stale ID ([4a63e68](https://github.com/joaodrp/omarchy-auto-brightness/commit/4a63e68dadb10d04047274205069a4efb9acbe7b))
+* **keyboard:** light a backlight with few steps at dim levels ([59d131f](https://github.com/joaodrp/omarchy-auto-brightness/commit/59d131f3fcfc92f222b7b05da6387d7854dfa870))
+* **keyboard:** no "Lock state unknown" flash when Auto is switched on ([00f0bfb](https://github.com/joaodrp/omarchy-auto-brightness/commit/00f0bfb19d34f5dd32fe01ded3fe7a10c202503a))
+* let the guard finish its second before timeout's own kill ([ce0be62](https://github.com/joaodrp/omarchy-auto-brightness/commit/ce0be6201b10c8bb08d962a3d15050da4be66459))
+* **service:** find the plugin's settings in any bar section ([336ac29](https://github.com/joaodrp/omarchy-auto-brightness/commit/336ac296357bb5c9d979cdfdf31fad9a6e3f68f0))
+
 ## [0.1.6](https://github.com/joaodrp/omarchy-auto-brightness/compare/v0.1.5...v0.1.6) (2026-11-05)
 
 
